@@ -16,13 +16,12 @@ something. So: https only, public addresses only, checked after resolution
 rather than by reading the hostname, with a size cap and a short timeout.
 """
 
-from typing import Dict, Optional, Tuple
-import ipaddress
-import socket
+from typing import Dict, Tuple
 import time
-import urllib.parse
 
 import requests
+
+from src.supermarkets import safefetch
 
 MAX_BYTES = 4 * 1024 * 1024
 TIMEOUT_S = 12
@@ -41,35 +40,13 @@ _HEADERS = {
 _cache: Dict[str, Tuple[float, str, bytes]] = {}
 
 
-class Refused(Exception):
-    """The URL is not one this will fetch, and why."""
-
-
-def _resolved_addresses(host: str):
-    try:
-        info = socket.getaddrinfo(host, None)
-    except socket.gaierror as exc:
-        raise Refused(f"That host could not be resolved ({exc}).") from exc
-    return {ipaddress.ip_address(item[4][0]) for item in info}
+# The address check lives with the recipe importer's, because there is no
+# reason for two of them and every reason for one that is tested.
+Refused = safefetch.Refused
 
 
 def _check(url: str) -> str:
-    """Refuse anything that is not a public https image URL."""
-    parsed = urllib.parse.urlsplit(url)
-    if parsed.scheme != "https":
-        raise Refused("Only https images are fetched.")
-    if not parsed.hostname:
-        raise Refused("That URL has no host.")
-
-    for address in _resolved_addresses(parsed.hostname):
-        # Reading the hostname is not enough: a name can resolve to a private
-        # address, which is exactly how this kind of proxy gets used to reach
-        # things on the network it is running inside.
-        if (address.is_private or address.is_loopback or address.is_reserved
-                or address.is_link_local or address.is_multicast
-                or address.is_unspecified):
-            raise Refused("That address is on a private network.")
-    return url
+    return safefetch.check_url(url, schemes=("https",))
 
 
 def fetch(url: str) -> Tuple[str, bytes]:

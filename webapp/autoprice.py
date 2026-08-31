@@ -153,6 +153,9 @@ def price_everything() -> Dict[str, int]:
                 data["shop"] = shop
                 data["prices"] = prices
                 plan.data = data
+                # So a page holding an older copy is told, rather than
+                # overwriting the reading this just took.
+                plan.version = (plan.version or 1) + 1
                 session.commit()
                 plans_touched += 1
                 lines_touched += changed

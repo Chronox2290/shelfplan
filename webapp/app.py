@@ -221,6 +221,10 @@ class PlanIn(BaseModel):
 
 
 class PlanPatch(BaseModel):
+    # Which version the page was working from. Older callers omit it and are
+    # allowed through unchecked, so an out-of-date phone still works -- it just
+    # does not get the protection.
+    base_version: Optional[int] = Field(default=None, ge=1)
     name: Optional[str] = Field(default=None, max_length=200)
     data: Optional[Dict[str, Any]] = None
 
@@ -436,6 +440,7 @@ def _plan_summary(plan: Plan) -> Dict[str, Any]:
     return {
         "id": plan.id,
         "name": plan.name,
+        "version": plan.version or 1,
         "updatedAt": plan.updated_at.isoformat() if plan.updated_at else None,
     }
 
@@ -490,6 +495,24 @@ def update_plan(
     session: Session = Depends(get_session),
 ) -> Dict[str, Any]:
     plan = _owned_plan(session, user, plan_id)
+
+    current = plan.version or 1
+    if (body.base_version is not None and body.data is not None
+            and body.base_version != current):
+        # Somebody else -- another device, another tab, or the weekly price
+        # check -- has written since this page loaded. Handing back the newer
+        # document lets the caller reapply its own change on top instead of
+        # flattening theirs.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "message": ("This plan changed somewhere else while you had it "
+                            "open. Your copy has been refreshed."),
+                "version": current,
+                "data": plan.data,
+            },
+        )
+
     if body.name is not None:
         plan.name = body.name
     if body.data is not None:
@@ -497,6 +520,7 @@ def update_plan(
         # client-side mistake would otherwise be unrecoverable.
         _snapshot(session, plan)
         plan.data = body.data
+        plan.version = current + 1
     session.commit()
     return {**_plan_summary(plan), "data": plan.data}
 
@@ -550,6 +574,9 @@ def undo_plan(
     restored_at = row.saved_at.isoformat() if row.saved_at else ""
     _snapshot(session, plan)
     plan.data = row.data
+    # An undo is a write like any other: a page still holding the pre-undo copy
+    # must be told, or its next save would put the undone thing straight back.
+    plan.version = (plan.version or 1) + 1
     session.delete(row)
     session.commit()
     return {**_plan_summary(plan), "restoredFrom": restored_at,
@@ -1112,6 +1139,7 @@ def autoplan(
                      "floorF": body.floor_fibre})
         data["meta"] = meta
         plan.data = data
+        plan.version = (plan.version or 1) + 1
         session.commit()
         result["applied"] = True
 
@@ -1347,6 +1375,7 @@ def refresh_prices(
     data["prices"] = prices
     data["shop"] = shop
     plan.data = data
+    plan.version = (plan.version or 1) + 1
     session.commit()
 
     return {
@@ -1763,6 +1792,7 @@ def add_shop_item(
     data["shop"] = shop
     data["prices"] = prices
     plan.data = data
+    plan.version = (plan.version or 1) + 1
     session.commit()
     return {"ok": True, "food": name, "item": shop[name]}
 
@@ -1784,6 +1814,7 @@ def remove_shop_item(
     data["shop"] = shop
     data["got"] = [g for g in (data.get("got") or []) if g != food]
     plan.data = data
+    plan.version = (plan.version or 1) + 1
     session.commit()
     return {"ok": True}
 

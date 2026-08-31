@@ -16,7 +16,16 @@ async function api(path, options = {}) {
   try { payload = await res.json(); } catch (_) { /* empty body */ }
   if (!res.ok) {
     const detail = payload && payload.detail;
-    throw new Error(typeof detail === 'string' ? detail : 'Request failed (' + res.status + ')');
+    // The status and the detail travel with the error. Without them a caller
+    // that wants to handle one particular failure -- a save that lost a race,
+    // say -- has only the message to go on, and cannot tell a conflict from
+    // anything else that went wrong.
+    const err = new Error(
+      typeof detail === 'string' ? detail
+        : (detail && detail.message) || 'Request failed (' + res.status + ')');
+    err.status = res.status;
+    err.detail = detail;
+    throw err;
   }
   return payload;
 }
@@ -203,7 +212,42 @@ async function loadPlan() {
 
 async function savePlan() {
   if (!state.plan) return;
-  await api('/plans/' + state.planId, { method: 'PUT', body: { data: state.plan.data } });
+  // Say which version this page was working from. If something else has
+  // written since -- the other device, another tab, the weekly price check --
+  // the server refuses rather than letting this copy flatten it.
+  try {
+    const saved = await api('/plans/' + state.planId, {
+      method: 'PUT',
+      body: { data: state.plan.data, base_version: state.plan.version },
+    });
+    state.plan.version = saved.version;
+    return;
+  } catch (err) {
+    if (err.status !== 409) throw err;
+  }
+
+  // Take the newer document and put this change back on top of it. Reloading
+  // alone would drop whatever the person just did, which is the thing worth
+  // protecting -- they are usually standing in a shop.
+  const mine = state.plan.data;
+  await loadPlan();
+  state.plan.data = mergePlans(state.plan.data, mine);
+  const saved = await api('/plans/' + state.planId, {
+    method: 'PUT',
+    body: { data: state.plan.data, base_version: state.plan.version },
+  });
+  state.plan.version = saved.version;
+  toast('This plan had changed elsewhere; your change was merged in.');
+}
+
+// Their copy is the base -- it is the newer one -- and this page's own edits
+// go on top. Ticked items are unioned rather than replaced, because two people
+// shopping from one list are each right about what they have picked up.
+function mergePlans(theirs, mine) {
+  const merged = { ...theirs, ...mine };
+  merged.prices = { ...(mine.prices || {}), ...(theirs.prices || {}) };
+  merged.got = [...new Set([...(theirs.got || []), ...(mine.got || [])])];
+  return merged;
 }
 
 /* A one-line report that does not need a place on the page to live. Errors
@@ -224,6 +268,34 @@ function toast(message, kind) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => bar.classList.remove('up'), 4200);
 }
+
+
+/* An image that fails to load ---------------------------------------------
+
+   These fallbacks were written as onerror="..." attributes with the glyph
+   pushed through JSON.stringify -- which emits its own double quotes, inside
+   an attribute already delimited by double quotes. The attribute ended early
+   and the browser parsed the remainder as a second attribute named
+   `🥦"}))"`, so nothing ever fell back: a store URL that had expired showed
+   the broken-image icon and stayed that way.
+
+   One listener instead, and no JavaScript in markup at all. Image load
+   failures do not bubble, so it has to listen in the capture phase. */
+
+document.addEventListener('error', (event) => {
+  const el = event.target;
+  if (!(el instanceof HTMLImageElement)) return;
+  if (el.dataset.onfail === 'remove') {
+    el.remove();
+    return;
+  }
+  if (el.dataset.onfail !== 'glyph') return;
+  const tile = document.createElement(el.dataset.failTag || 'div');
+  tile.className = el.dataset.failClass || '';
+  tile.textContent = el.dataset.failMark || '';
+  tile.setAttribute('aria-hidden', 'true');
+  el.replaceWith(tile);
+}, true);
 
 
 /* ------------------------------------------------------------------- tabs */
@@ -798,7 +870,7 @@ function recipeCard(r, opts) {
     ${r.image ? `<img class="recipe-hero" src="${esc(
       /^https?:/i.test(r.image) && !/woolworths\.media|coles\.com\.au/.test(r.image)
         ? remoteImage(r.image) : r.image)}" alt=""
-      onerror="this.remove()">` : recipeStrip(r)}
+      data-onfail="remove">` : recipeStrip(r)}
     <div class="recipe-body">
       ${macroLine(r.perServing, r.servings)}
       <h4>Ingredients</h4>${ing}${steps}${reheat}${notes}
@@ -2257,8 +2329,8 @@ function thumb(p) {
   }
   return `<img class="thumb" src="${esc(p.image)}" alt=""
     decoding="async" referrerpolicy="no-referrer"
-    onerror="this.replaceWith(Object.assign(document.createElement('div'),
-      {className:'thumb none',textContent:${JSON.stringify(mark)}}))">`;
+    data-onfail="glyph" data-fail-class="thumb none"
+    data-fail-mark="${esc(mark)}">`;
 }
 
 function resultRows(items, opts) {
@@ -3062,7 +3134,7 @@ function renderFound() {
   return `<div class="card" style="margin:0">
     <div class="row" style="align-items:flex-start">
       ${r.image ? `<img class="thumb" style="width:110px;height:110px"
-        src="${esc(remoteImage(r.image))}" alt="" onerror="this.remove()">` : ''}
+        src="${esc(remoteImage(r.image))}" alt="" data-onfail="remove">` : ''}
       <div style="flex:1;min-width:0">
         <h3 style="margin:0">${esc(r.name)}</h3>
         <p class="muted small" style="margin:3px 0 0">
@@ -3729,10 +3801,9 @@ function foodPhoto(name, cls, fallbackSrc) {
       >${foodGlyph(name) || esc(label.slice(0, 1).toUpperCase())}</span>`;
   }
   return `<img class="food-pic ${cls || ''}" src="${esc(src)}" alt=""
-    decoding="async" onerror="this.replaceWith(Object.assign(
-      document.createElement('span'),
-      {className:'food-pic none ${cls || ''}',
-       textContent:${JSON.stringify(foodGlyph(name) || '')}}))">`;
+    decoding="async" data-onfail="glyph" data-fail-tag="span"
+    data-fail-class="food-pic none ${esc(cls || '')}"
+    data-fail-mark="${esc(foodGlyph(name) || '')}">`;
 }
 
 // The dish in four pictures: what it is built on, then whatever else there is

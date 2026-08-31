@@ -1907,3 +1907,62 @@ weight to divide by are different things, and the resolver now says which is
 which.
 
 `scripts/test_review.py` keeps all of it.
+
+## A review of the rest of it
+
+### Every image fallback was dead
+
+They were written as `onerror="..."` attributes with the glyph pushed through
+`JSON.stringify`, which emits its own double quotes — inside an attribute
+already delimited by double quotes. The attribute ended early and the browser
+parsed the remainder as a second attribute literally named `🥦"}))"`. Nothing
+ever fell back: a store URL that had expired showed the broken-image icon and
+stayed that way, which is what the broken olive oil looked like.
+
+One capture-phase listener now, and no JavaScript in markup at all. (Image load
+failures do not bubble, hence capture.) Verified in a browser: a dud URL now
+becomes 🥦.
+
+### Two devices could quietly overwrite each other
+
+Every save sent the whole plan document and the server took it. A phone ticking
+items off in a shop and a laptop open on the week each held a copy from
+whenever they loaded, and whichever saved last won outright. The weekly price
+check writes unattended, so this did not even need two people.
+
+Plans carry a version. A save says which version it worked from; one quoting an
+older version is refused with the current document attached, and the page puts
+its own change back on top rather than flattening what it found. Ticked items
+are unioned — two people shopping from one list are each right about what they
+have picked up.
+
+Nothing was ever unrecoverable, since every write snapshots first. But nobody
+should have to notice that their shopping list was discarded and go looking for
+Undo.
+
+### The recipe importer would fetch your own network
+
+`recipe_import.fetch` took any `http(s)` URL and fetched it, with no check on
+where it pointed. It reached `http://127.0.0.1:8000/api/version` — the app
+itself — and would have reached the router, a NAS admin page, or anything else
+on the LAN, reporting back enough to tell what is there. On an instance shared
+with a friend that is their route onto your network.
+
+The image proxy already had this guard. Now there is one copy of it, in
+`src/supermarkets/safefetch.py`, used by both: public addresses only, checked
+after DNS resolution and again after every redirect.
+
+### What held up
+
+Authentication reads well: Argon2 with rehash-on-login, single-use expiring
+reset tokens stored only as SHA-256 hashes, session invalidation on password
+change, `httponly`/`samesite` cookies, `hmac.compare_digest` on the invite code,
+rate limits applied *before* the deliberately-expensive hash, and a hash
+computed even for accounts that do not exist so a missing account and a wrong
+password take the same time. Forgot-password says the same thing either way.
+
+Output escaping is consistent — every interpolation of a name, a food or a
+product goes through `esc`, and the two places that do not are `toast()` and
+`confirm()`, which take text rather than markup. Imported URLs are checked
+against `^https?://` before they can become an `href`, so none can be a
+`javascript:` link. Secrets are all out of git.

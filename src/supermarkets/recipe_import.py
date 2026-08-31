@@ -19,6 +19,8 @@ import re
 
 import requests
 
+from . import safefetch
+
 _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -503,8 +505,26 @@ def fetch(url: str, timeout: int = 20) -> Dict[str, Any]:
     """Fetch one page and extract its recipe."""
     if not re.match(r"^https?://", url or ""):
         return {"status": "error", "message": "That does not look like a web address."}
+    # Fetching whatever address a caller supplies is a way to reach the network
+    # this server is sitting on, and this one is built to sit on a home NAS.
+    # It would happily fetch 127.0.0.1 and the router's admin page otherwise.
     try:
-        response = requests.get(url, headers=_HEADERS, timeout=timeout)
+        safefetch.check_url(url, schemes=("http", "https"))
+    except safefetch.Refused as exc:
+        return {"status": "error", "message": str(exc)}
+    try:
+        response = requests.get(url, headers=_HEADERS, timeout=timeout,
+                                allow_redirects=False)
+        # A redirect is a second address, and the first check said nothing
+        # about it.
+        while response.is_redirect and response.headers.get("location"):
+            nxt = requests.compat.urljoin(url, response.headers["location"])
+            safefetch.check_url(nxt, schemes=("http", "https"))
+            url = nxt
+            response = requests.get(url, headers=_HEADERS, timeout=timeout,
+                                    allow_redirects=False)
+    except safefetch.Refused as exc:
+        return {"status": "error", "message": str(exc)}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "message": f"Could not reach that page: {exc}"}
     if response.status_code != 200:

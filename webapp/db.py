@@ -68,6 +68,9 @@ class Plan(Base):
     )
     name: Mapped[str] = mapped_column(String(200), default="My plan")
     data: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+    # Bumped on every write. A save that quotes an older one is working from a
+    # copy that has since moved, and is refused rather than applied over it.
+    version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow
@@ -271,6 +274,12 @@ def _migrate(connection) -> None:
             connection.execute(text(
                 f"ALTER TABLE {table} ADD COLUMN was_price FLOAT"))
             connection.commit()
+
+    rows = connection.execute(text("PRAGMA table_info(plans)")).fetchall()
+    if rows and not any(r[1] == "version" for r in rows):
+        connection.execute(text(
+            "ALTER TABLE plans ADD COLUMN version INTEGER DEFAULT 1"))
+        connection.commit()
 
     rows = connection.execute(text("PRAGMA table_info(products)")).fetchall()
     if rows and not any(r[1] == "department" for r in rows):
