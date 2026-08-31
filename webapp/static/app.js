@@ -4527,6 +4527,17 @@ async function boot() {
   try {
     authConfig = await api('/auth/config');
   } catch (_) { /* fall back to the defaults above */ }
+
+  // A reset link lands on /?reset=<token> and has to be answered before
+  // anything else: the person following it cannot sign in, which is the whole
+  // reason they are here. Nothing checked for it, so every reset email led to
+  // the sign-in form and the reset screen was unreachable -- the form existed,
+  // the endpoint worked, and there was no way to get from one to the other.
+  if (pendingResetToken()) {
+    showReset();
+    return;
+  }
+
   const who = await api('/auth/me');
   if (!who.signedIn) { showAuth(); return; }
   state.user = who;

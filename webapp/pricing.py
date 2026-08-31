@@ -19,6 +19,7 @@ never passed off as today's.
 """
 
 from datetime import datetime, timedelta, timezone
+import re
 from typing import Any, Dict, List, Optional
 import os
 import threading
@@ -339,6 +340,56 @@ def cache_status(session: Session) -> Dict[str, Any]:
         "byStore": per_store,
         "paused": breaker.status(),
     }
+
+
+def candidates_for(session: Session, food: str, query: str,
+                   aisle: str = "", store: str = "woolworths",
+                   limit: int = 24) -> List[Dict[str, Any]]:
+    """Products worth considering for one ingredient, from the catalogue.
+
+    One place, because there are four callers and they were drifting. The
+    pack-size fix went into the price table and not into the weekly check or
+    the swap sheet, so the weekly check would have quietly re-matched polenta
+    to the dearer corn meal every Wednesday -- a fix applied where somebody
+    happened to notice the symptom rather than where the cause was.
+
+    Two things it does that a plain search does not:
+
+    * Takes the pack size out of the query first. The catalogue matches on
+      every word, so "Polenta 500g" can only ever find labels that repeat it,
+      and the 750g bag never becomes a candidate at all.
+    * Prefers the right department for fresh produce. "Mutti Whole Cherry
+      Tomatoes" does not say tinned anywhere in its name, and the department
+      is the only thing that reliably knows.
+    """
+    unsized = " ".join(
+        word for word in (query or "").split()
+        if not re.match(r"^\d+(?:\.\d+)?(?:g|kg|ml|l|pk)?$", word, re.I)
+        and word.lower() not in ("pack", "tin", "tins", "jar"))
+    plain = (food or "").split(",")[0]
+
+    seen, terms = set(), []
+    for term in (unsized, plain, " ".join(plain.split()[:2]), query):
+        term = (term or "").strip()
+        if term and term.lower() not in seen:
+            seen.add(term.lower())
+            terms.append(term)
+
+    products: List[Dict[str, Any]] = []
+    for term in terms:
+        products = catalogue_search(
+            session, query=term, store=store, limit=limit).get("products") or []
+        if products:
+            break
+
+    if aisle == "produce":
+        # Only when some candidate actually carries a department, so a
+        # catalogue recorded before departments were stored behaves as before.
+        fresh = [p for p in products
+                 if (p.get("department") or "").upper() == "FRUIT AND VEG"]
+        if fresh:
+            products = fresh
+    return products
 
 
 def pinned_product(session: Session,

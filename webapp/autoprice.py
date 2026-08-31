@@ -26,7 +26,7 @@ import time
 
 from sqlalchemy import select
 
-from src.supermarkets import resolve
+from src.supermarkets import recipes as recipe_lib, resolve
 
 from . import pricing
 from .db import Plan, SessionLocal
@@ -77,16 +77,9 @@ def _price_line(session, food: str, meta: Dict[str, Any],
         return record
 
     query = (meta or {}).get("woo") or food
-    products = pricing.catalogue_search(
-        session, query=query, store="woolworths", limit=24).get("products") or []
-    if not products:
-        plain = food.split(",")[0]
-        for attempt in (plain, " ".join(plain.split()[:2])):
-            products = (pricing.catalogue_search(
-                session, query=attempt, store="woolworths",
-                limit=24).get("products") or [])
-            if products:
-                break
+    ingredient = recipe_lib.INGREDIENTS.get(food) or {}
+    products = pricing.candidates_for(
+        session, food, query, aisle=ingredient.get("aisle", ""))
     if not products:
         return None
 
@@ -95,9 +88,11 @@ def _price_line(session, food: str, meta: Dict[str, Any],
                                           target_pack_g=target)
     if found.get("status") != "ok" or not found.get("price"):
         return None
-    # A shaky match is not worth writing into a history somebody reads as
-    # fact. Better a gap in the line than a wrong reading in it.
-    if found.get("needs_review"):
+    # A doubtful *product* is not worth writing into a history somebody reads
+    # as fact -- better a gap than a wrong reading. Being sold by the each is
+    # not doubt about the product, though, and refusing those meant broccoli,
+    # bananas and every other loose vegetable were never priced at all.
+    if found.get("mismatch"):
         return None
 
     record = {

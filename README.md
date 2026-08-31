@@ -1873,3 +1873,37 @@ and the "cheapest yet" verdict with the price of something else. Readings whose
 matched product the current matcher rejects — a mixture, a prepared form, a
 contradicted qualifier, tinned where fresh was wanted — are dropped rather than
 kept as data.
+
+## What a review of the day's work found
+
+Reviewing for the *classes* of bug already found, rather than for new ones,
+turned up five more instances of them.
+
+**Password reset was unreachable.** The reset form existed, the endpoint
+worked, the email sent a correct link — and `boot()` never looked for the
+token, so every reset link showed the sign-in screen instead. The form and the
+route to it had been built at different times and never joined up.
+
+**The pack-size fix had gone into one caller of four.** Stripping the size out
+of a catalogue query landed in the price table only. The weekly check and the
+swap sheet still narrowed on it, so the Wednesday run would have quietly
+re-matched polenta to the dearer corn meal every week — a fix applied where the
+symptom was noticed rather than where the cause was. The produce-department
+preference had the same shape: one caller.
+
+All ingredient lookups now go through `pricing.candidates_for`. Exactly one
+direct `catalogue_search` remains, in the catalogue search box, where a query
+is a query. A test asserts that count so they cannot drift apart again.
+
+**Ingredient swaps took the cheapest per kilo out of a raw search**, with no
+check that the cheapest thing was the right food and the pack size still
+narrowing what it could find.
+
+**The weekly check refused to price anything sold by the each.** It skipped any
+match flagged `needs_review`, and "sold per-each, no weight basis" is one of
+those flags — so broccoli, bananas, cauliflower and every loose vegetable would
+never have been priced at all. A doubtful *product* and a product with no
+weight to divide by are different things, and the resolver now says which is
+which.
+
+`scripts/test_review.py` keeps all of it.

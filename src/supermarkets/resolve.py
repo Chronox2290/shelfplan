@@ -434,12 +434,26 @@ def resolve_from_products(
         if basis == "gross" and ratio > 1.6:
             reasons.append("pack size differs sharply from the planned pack")
 
+    # "Needs review" lumps two different things together: this might be the
+    # wrong product, and this is the right product but sold by the each. Only
+    # the first should stop anything -- a caller that refuses to record a
+    # reading unless the match is clean was refusing to price broccoli for
+    # ever, because loose broccoli has no weight to divide by and says so.
+    wrong_product = bool(
+        clashes
+        or form_penalty(wanted, best.get("name", ""))
+        or processed_penalty(wanted, best.get("name", ""))
+        or mixture_penalty(wanted, best.get("name", ""))
+        or keeping_penalty(wanted, best.get("name", ""))
+        or similarity < 0.4)
+
     return {
         "food": food,
         "query": query,
         "status": "ok",
         "confidence": round(max(0.0, similarity - 0.5 * clashes), 2),
         "needs_review": bool(reasons),
+        "mismatch": wrong_product,
         "review_reasons": reasons,
         "price": pack_price,
         "pack": round(basis_g) if basis_g else None,

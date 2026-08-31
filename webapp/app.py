@@ -689,28 +689,6 @@ def browse_recipes(
         limit=max(1, min(int(limit), 120)), offset=max(0, int(offset)))
 
 
-def _search_terms(food: str, query: str) -> List[str]:
-    """Ways to look a food up in the catalogue, widest useful first.
-
-    A pack size in a shopping query is a filter nobody intended: the catalogue
-    matches on every word, so "Chickpeas 400g tin" finds only tins whose label
-    happens to say 400g. The sized query is tried last rather than not at all,
-    since occasionally it is the only thing that matches.
-    """
-    unsized = " ".join(
-        word for word in query.split()
-        if not re.match(r"^\d+(?:\.\d+)?(?:g|kg|ml|l|pk)?$", word, re.I)
-        and word.lower() not in ("pack", "tin", "tins", "jar"))
-    plain = food.split(",")[0]
-    seen, out = set(), []
-    for term in (unsized, plain, " ".join(plain.split()[:2]), query):
-        term = (term or "").strip()
-        if term and term.lower() not in seen:
-            seen.add(term.lower())
-            out.append(term)
-    return out
-
-
 def ingredient_prices(session: Session) -> Dict[str, Dict[str, Any]]:
     """What each ingredient costs a pack, from the catalogue only.
 
@@ -728,32 +706,10 @@ def ingredient_prices(session: Session) -> Dict[str, Dict[str, Any]]:
     """
     out: Dict[str, Dict[str, Any]] = {}
     for food, meta in recipes.INGREDIENTS.items():
-        # The pack size has to come out of the query before the search, not
-        # only when the search finds nothing. The catalogue requires every word
-        # to appear, so "Polenta 500g" quietly excludes the 750g bag -- and
-        # since two 500g products did match, the fallback never fired and the
-        # cheaper, better-matching pack was never even a candidate.
-        products = []
-        for attempt in _search_terms(food, meta["query"]):
-            products = pricing.catalogue_search(
-                session, query=attempt, store="woolworths",
-                limit=24).get("products") or []
-            if products:
-                break
+        products = pricing.candidates_for(
+            session, food, meta["query"], aisle=meta.get("aisle", ""))
         if not products:
             continue
-        # Fresh produce comes from the fruit and veg department. A tin of
-        # cherry tomatoes is named almost identically to a punnet of them --
-        # "Mutti Whole Cherry Tomatoes" does not say tinned anywhere -- so
-        # where the store has told us which aisle a product sits in, that is
-        # the only thing that can tell them apart. Only applied when some
-        # candidate actually carries a department, so a catalogue recorded
-        # before this existed behaves as it did.
-        if meta.get("aisle") == "produce":
-            fresh = [x for x in products
-                     if (x.get("department") or "").upper() == "FRUIT AND VEG"]
-            if fresh:
-                products = fresh
 
         result = resolve.resolve_from_products(
             food, meta["query"], products, target_pack_g=meta.get("pack"))
@@ -888,30 +844,13 @@ def food_images(
     wanted = {name: meta["query"] for name, meta in recipes.INGREDIENTS.items()}
     found: Dict[str, str] = {}
     for name, query in wanted.items():
-        # The catalogue requires every word to appear, which is right for a
-        # search box and wrong here: the shopping queries carry words no label
-        # has -- "420g tin", "12 pack", "RSPCA" -- so the strictest form finds
-        # nothing for exactly the staples most worth a picture. Loosen a step
-        # at a time and stop at the first thing that answers.
-        plain = name.split(",")[0]
-        # The pack size in a shopping query is the part no product label
-        # repeats, so dropping it is the first and usually the only step
-        # needed: "Burghul Wheat 500g" finds nothing, "Burghul Wheat" finds it.
-        unsized = " ".join(w for w in query.split()
-                           if not re.match(r"^\d+(?:\.\d+)?(?:g|kg|ml|l|pk)?$", w, re.I)
-                           and w.lower() not in ("pack", "tin", "tins", "jar"))
-        attempts = [query, unsized, plain,
-                    " ".join(plain.split()[:2]), plain.split()[0]]
-        for attempt in attempts:
-            if not attempt:
-                continue
-            hit = pricing.catalogue_search(
-                session, query=attempt, store="woolworths", limit=4)
-            image = next((p["image"] for p in hit.get("products", [])
-                          if p.get("image")), None)
-            if image:
-                found[name] = image
-                break
+        meta = recipes.INGREDIENTS[name]
+        products = pricing.candidates_for(
+            session, name, query, aisle=meta.get("aisle", ""), limit=6)
+        image = next((p["image"] for p in products if p.get("image")), None)
+        if image:
+            found[name] = image
+
     return {"images": found, "count": len(found), "of": len(wanted)}
 
 
@@ -1204,12 +1143,23 @@ def swaps(
     options = recipes.swaps_for(food)
     if priced:
         for option in options:
-            hits = pricing.catalogue_search(
-                session, query=option["query"], limit=3, sort="cheapest")
-            best = next((p for p in hits["products"] if p.get("per_kg")), None)
-            option["perKg"] = best["per_kg"] if best else None
-            option["matched"] = best["name"] if best else None
-            option["image"] = best.get("image") if best else ""
+            # Through the shared lookup and the resolver, like everything else.
+            # It used to take the cheapest per kilo out of a raw search, with
+            # no check that the cheapest thing was even the right food -- and
+            # with the pack size still in the query, narrowing what it could
+            # find in the first place.
+            name = option.get("food") or option["query"]
+            meta = recipes.INGREDIENTS.get(name) or {}
+            products = pricing.candidates_for(
+                session, name, option["query"],
+                aisle=meta.get("aisle", ""), limit=12)
+            found = resolve.resolve_from_products(
+                name, option["query"], products,
+                target_pack_g=meta.get("pack")) if products else {}
+            usable = found.get("status") == "ok" and not found.get("mismatch")
+            option["perKg"] = found.get("per_kg") if usable else None
+            option["matched"] = found.get("matched_name") if usable else None
+            option["image"] = (found.get("image") or "") if usable else ""
     return {"food": food, "options": options}
 
 
@@ -1675,16 +1625,10 @@ def alternatives(
         found = pricing.search(session, term, limit=36, store="woolworths")
         products = found.get("products") or []
     else:
-        products = pricing.catalogue_search(
-            session, query=term, store="woolworths", limit=40).get("products") or []
-        if not products:
-            plain = food.split(",")[0]
-            for attempt in (plain, " ".join(plain.split()[:2])):
-                products = (pricing.catalogue_search(
-                    session, query=attempt, store="woolworths",
-                    limit=40).get("products") or [])
-                if products:
-                    break
+        # Deliberately without the produce filter: this is the sheet somebody
+        # opens *because* they disagree with the match, so narrowing it to the
+        # aisle the app already chose would hide the answer they came for.
+        products = pricing.candidates_for(session, food, term, limit=40)
 
     wanted = f"{term} {food}"
     ranked = sorted(
