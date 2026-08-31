@@ -140,6 +140,16 @@ class SaveRecipesRequest(BaseModel):
     recipes: List[Dict[str, Any]]
 
 
+class DeleteRecipesRequest(BaseModel):
+    """Which recipes to delete, named outright.
+
+    Ids rather than "delete everything" on purpose. The page deletes what it is
+    currently showing, and what it is showing depends on filters -- so the two
+    have to agree on the exact list, or a filtered delete could take the lot.
+    """
+    ids: List[int] = Field(..., min_length=1, max_length=2000)
+
+
 class ShopItemIn(BaseModel):
     """Add a product to the shopping list."""
     food: Optional[str] = Field(default=None, max_length=300)
@@ -1470,6 +1480,22 @@ def delete_recipe(
     session.delete(recipe)
     session.commit()
     return {"ok": True}
+
+
+@app.post("/api/recipes/delete-many")
+def delete_recipes(
+    body: DeleteRecipesRequest,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Delete a batch, ignoring anything that is not yours or not there."""
+    rows = session.scalars(
+        select(Recipe).where(Recipe.user_id == user.id,
+                             Recipe.id.in_(body.ids))).all()
+    for row in rows:
+        session.delete(row)
+    session.commit()
+    return {"deleted": len(rows), "asked": len(body.ids)}
 
 
 @app.post("/api/prices/manual")

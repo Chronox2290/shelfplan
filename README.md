@@ -1568,3 +1568,22 @@ on describing the week it had planned -- so the totals appeared not to change.
 Any hand edit now retires the report, the same way clearing and undo already
 did. A meal added by hand also lands in whichever sitting the day is still
 missing rather than showing up unlabelled.
+
+## Clearing the library
+
+**Delete all** in the recipe library, which deletes *what is on screen* rather
+than everything unconditionally. The filters are right there, so wanting rid of
+just the expensive ones, or just the breakfasts, is a filter and one button
+instead of twenty separate confirmations. The button says which it is --
+"Delete all 9" or "Delete these 3" -- and the confirmation repeats the count.
+
+Both the page and the button read the same `libShown()`, because a button
+saying "delete these 6" has to mean the same six on the screen; two copies of
+that filtering could drift apart, and the way you would find out is by losing
+recipes.
+
+The request names the ids outright rather than meaning "everything", the server
+ignores any that are not yours or no longer exist, and an empty list is
+refused. Recipes are not covered by the plan's undo, so the confirmation says
+plainly that this one cannot be taken back and that days still using them will
+say the recipe is missing.

@@ -631,14 +631,12 @@ const LIB_SORTS = [
   { id: 'protein', label: 'Most protein' },
 ];
 
-function viewRecipes() {
+// The filtered, sorted library. The page and the delete button both read it,
+// because a button that says "delete these 6" has to mean the same six that
+// are on the screen -- two copies of this logic could drift, and the way you
+// find out is by losing recipes.
+function libShown() {
   const list = state.recipes || [];
-  if (!list.length) {
-    return `<div class="card"><h2>No saved recipes</h2>
-      <p class="sub">Build some in the Recipe builder, then choose
-        &ldquo;Save to library&rdquo;. Rated recipes sort to the top here.</p></div>`;
-  }
-
   const needle = libView.q.trim().toLowerCase();
   const shown = list.filter((r) => {
     if (libView.meal && !(r.meals || (r.meal ? [r.meal] : ['lunch', 'dinner']))
@@ -663,16 +661,39 @@ function viewRecipes() {
     kcal: (a, b) => (per(a).kcal || 0) - (per(b).kcal || 0) || byName(a, b),
     protein: (a, b) => (per(b).p || 0) - (per(a).p || 0) || byName(a, b),
   };
-  shown.sort(sorters[libView.sort] || sorters.best);
+  return shown.sort(sorters[libView.sort] || sorters.best);
+}
+
+
+function viewRecipes() {
+  const list = state.recipes || [];
+  if (!list.length) {
+    return `<div class="card"><h2>No saved recipes</h2>
+      <p class="sub">Build some in the Recipe builder, then choose
+        &ldquo;Save to library&rdquo;. Rated recipes sort to the top here.</p></div>`;
+  }
+
+  const shown = libShown();
 
   const counts = {};
   CAT_ORDER.forEach((c) => { counts[c] = list.filter(
     (r) => categoryOf(r) === c).length; });
 
+  // Deleting what is on screen rather than "everything" -- the filters are
+  // right there, so wanting rid of just the dear ones, or just the fish, is a
+  // filter and a button rather than twenty separate confirmations.
+  const filtered = shown.length !== list.length;
   return `<div class="card">
-    <h2>Recipe library</h2>
-    <p class="sub">${list.length} saved${
-      shown.length !== list.length ? `, ${shown.length} shown` : ''}.</p>
+    <div class="row" style="align-items:baseline">
+      <div style="flex:1;min-width:0">
+        <h2 style="margin:0">Recipe library</h2>
+        <p class="sub" style="margin:4px 0 0">${list.length} saved${
+          filtered ? `, ${shown.length} shown` : ''}.</p>
+      </div>
+      ${shown.length ? `<button class="ghost danger" id="libDelete">${
+        filtered ? `Delete these ${shown.length}` : `Delete all ${list.length}`
+      }</button>` : ''}
+    </div>
     <div class="row">
       <div style="flex:2;min-width:170px">
         <label for="libFind">Search</label>
@@ -710,6 +731,30 @@ function wireRecipes() {
       again.setSelectionRange(again.value.length, again.value.length);
     }
   });
+  const wipeLib = $('libDelete');
+  if (wipeLib) wipeLib.addEventListener('click', async () => {
+    const ids = libShown().map((r) => r.id);
+    if (!ids.length) return;
+    const what = ids.length === (state.recipes || []).length
+      ? `all ${ids.length} saved recipes`
+      : `the ${ids.length} recipes shown`;
+    // Recipes are not covered by the plan's undo, so this one really is gone.
+    if (!window.confirm(`Delete ${what}?
+
+This cannot be undone. Days in `
+      + 'your week that used them will say the recipe is missing.')) return;
+    wipeLib.disabled = true;
+    wipeLib.textContent = 'Deleting…';
+    try {
+      const res = await api('/recipes/delete-many', { method: 'POST', body: { ids } });
+      await loadRecipes();
+      toast(`Deleted ${res.deleted} recipe${res.deleted === 1 ? '' : 's'}.`);
+    } catch (err) {
+      toast(err.message);
+    }
+    render();
+  });
+
   const meal = $('libMeal');
   if (meal) meal.addEventListener('change', () => {
     libView.meal = meal.value;
