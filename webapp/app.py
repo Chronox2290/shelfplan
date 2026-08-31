@@ -781,6 +781,12 @@ def ingredient_prices(session: Session) -> Dict[str, Dict[str, Any]]:
             if a.get("pack_price") and a.get("per_kg") and as_good(a)]
         priced = [c for c in choices if c.get("pack_price") and c.get("per_kg")]
         best = min(priced, key=lambda c: c["per_kg"]) if priced else winner
+        # Carried through so the planner can prefer an ingredient that is
+        # genuinely cheap *this week*, not only cheap in general -- and so a
+        # shopping line can say so.
+        match = next((x for x in products if x.get("name") == best.get("name")), None)
+        on_special = bool((match or {}).get("on_special")
+                          or (best is winner and result.get("on_special")))
         # The picture belongs to whichever product was chosen, so it has to
         # come from the same place the price did. Leaving it out is why a
         # shopping line kept whatever image it was first given, however wrong.
@@ -803,6 +809,7 @@ def ingredient_prices(session: Session) -> Dict[str, Dict[str, Any]]:
             "url": link,
             "stockcode": str((best.get("stockcode")
                               or result.get("stockcode") or "")),
+            "onSpecial": on_special,
         }
     return out
 

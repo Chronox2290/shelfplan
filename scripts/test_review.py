@@ -29,6 +29,26 @@ def check(label, ok, extra=""):
 app_js = io.open(os.path.join(ROOT, "webapp", "static", "app.js"),
                  encoding="utf-8").read()
 
+print("no source file hides a stray control byte where an escape belongs")
+# The exact bug this catches: a regex word-boundary escape got collapsed by
+# some intermediate tool into the single control byte a couple of escape
+# dialects give that same two-character spelling, leaving a regex that still
+# parses and still runs, just against a control byte that real text never
+# contains -- so it silently stops matching anything. It happened twice in
+# one session, in two different languages, and a syntax check caught neither
+# time, because the file was still syntactically valid. Nothing legitimate in
+# this project's source ever needs a literal control byte below the space
+# character other than tab, newline and carriage return.
+_control_names = {chr(0): "NUL", chr(1): "SOH", chr(8): "backspace",
+                  chr(11): "vertical tab", chr(12): "form feed"}
+for relative in ("webapp/static/app.js", "webapp/static/index.html", "webapp/app.py",
+                 "webapp/pricing.py", "src/supermarkets/recipes.py",
+                 "src/supermarkets/weekplan.py", "src/supermarkets/recipe_import.py",
+                 "src/supermarkets/resolve.py", "src/supermarkets/catalog.py"):
+    text = io.open(os.path.join(ROOT, *relative.split("/")), encoding="utf-8").read()
+    found = [name for ch, name in _control_names.items() if ch in text]
+    check(f"{relative} has no stray control bytes", not found, str(found))
+
 print("a reset link has to reach the reset screen")
 boot = app_js[app_js.index("async function boot()"):]
 boot = boot[:boot.index("\n}\n")]

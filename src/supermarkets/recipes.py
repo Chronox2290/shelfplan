@@ -1938,6 +1938,16 @@ def build_best(
                 penalty -= 0.12
             if candidate.get("base") in (prefer_pool.get("base") or []):
                 penalty -= 0.06
+        if prices:
+            # "Buy the fish on price, not on the plan" -- build to what is
+            # actually discounted this week rather than to a fixed favourite,
+            # the same reasoning the reference plan's swap table argued for.
+            # A small nudge, not a rule: it only breaks a near-tie, the way
+            # the pool bonus above does.
+            if (prices.get(candidate.get("protein")) or {}).get("onSpecial"):
+                penalty -= 0.10
+            if (prices.get(candidate.get("base")) or {}).get("onSpecial"):
+                penalty -= 0.05
         if best_score is None or penalty < best_score:
             best, best_score = candidate, penalty
         if penalty < 0.05 and not cost_ceiling:

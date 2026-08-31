@@ -2547,7 +2547,7 @@ function wireAddButtons() {
 // the parser upstream does not do it for us.
 function cleanIngredientName(part) {
   let name = (part.item || part.original || '').trim();
-  name = name.replace(/^\/\s*[\d.]+\s*(?:fl\s?oz|floz|oz|lbs?|g|kg|ml|l)\.?\s*/i, '');
+  name = name.replace(/^\/\s*[\d.]+\s*(?:fl\s?oz|floz|oz|lbs?|g|kg|ml|l)\b\.?\s*/i, '');
   // Run twice: "(, packed (Holy Basil, if you can find it) (Note 1))" nests,
   // and a single pass only clears the innermost pair.
   for (let i = 0; i < 3; i++) name = name.replace(/\([^()]*\)/g, ' ');

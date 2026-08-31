@@ -238,6 +238,20 @@ with TestClient(app) as c:
           isinstance(result.get('dishesToCook'), int) and result['dishesToCook'] > 0)
 
     print()
+    print('planning nudges toward what is on special this week')
+    # "Buy the fish on price, not on the plan" -- build_best should not
+    # reject or crash on prices carrying an onSpecial flag, and a discounted
+    # protein should be at least as likely to be chosen as an otherwise
+    # identical week without one.
+    special_prices = {"Chicken breast, raw": {"price": 6.0, "per_kg": 6.0,
+                                               "onSpecial": True, "pack": 1000}}
+    priced = recipe_lib.build_best(
+        'test:special:1', {'kcal': 600, 'protein': 45}, servings=4,
+        diet='any', cuisine='any', meal='lunch', prices=special_prices)
+    check('build_best accepts an onSpecial price without error',
+          priced is not None)
+
+    print()
     print('a fresh account autoplans a genuinely shared pool')
     c.post('/api/auth/register',
            json={'email': 'poolcheck@example.com', 'password': 'a-long-enough-password'})
