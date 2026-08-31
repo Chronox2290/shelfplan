@@ -94,6 +94,91 @@ with TestClient(app) as c:
         'food': 'Red kidney beans, drained', 'grams': 100, 'target': 'p'})
     check('rebalance responds', r.status_code == 200, r.text[:120])
 
+    print('meals of the day')
+    slots = {}
+    for meal in ('breakfast', 'lunch', 'dinner'):
+        got = c.get(f'/api/recipes/browse?meal={meal}&limit=20').json()
+        slots[meal] = got
+        check(f'{meal} has dishes', got['total'] > 20, f"{got['total']:,}")
+        shapes = {r['template'] for r in got['recipes']}
+        check(f'{meal} shows a spread of shapes', len(shapes) >= 4,
+              ','.join(sorted(shapes)))
+    bfast = {r['template'] for r in slots['breakfast']['recipes']}
+    dinner = {r['template'] for r in slots['dinner']['recipes']}
+    check('no dinner shape turns up at breakfast',
+          not (bfast & {'ragu', 'curry', 'traybake', 'braise', 'tagine'}),
+          ','.join(sorted(bfast)))
+    check('no breakfast shape turns up at dinner',
+          not (dinner & {'porridge', 'smoothie', 'yoghurtbowl'}),
+          ','.join(sorted(dinner)))
+
+    print('diets')
+    keto = c.get('/api/recipes/browse?diet=keto&limit=20').json()
+    check('keto has dishes', keto['total'] > 50, f"{keto['total']:,}")
+    worst = max((r['perServing']['c'] for r in keto['recipes']), default=999)
+    check('keto stays low on carbohydrate', worst <= 40, f"worst {worst:.0f}g")
+    banned = ('rice', 'pasta', 'potato', 'bread', 'oats', 'couscous',
+              'noodles, dry', 'polenta', 'quinoa', 'barley', 'tortilla')
+    bad = [r['name'] for r in keto['recipes']
+           for i in r['ingredients']
+           if any(b in i['food'].lower() for b in banned)
+           and 'konjac' not in i['food'].lower()
+           and 'zucchini' not in i['food'].lower()
+           and 'cauliflower' not in i['food'].lower()]
+    check('keto has no grain or starch bases', not bad, '; '.join(bad[:2]))
+
+    vegan = c.get('/api/recipes/browse?diet=vegan&limit=20').json()
+    check('vegan has dishes', vegan['total'] > 50, f"{vegan['total']:,}")
+    # Whole words only: "eggplant" contains "egg" and is a vegetable.
+    animal = {'chicken', 'beef', 'pork', 'lamb', 'salmon', 'tuna', 'prawns',
+              'fish', 'eggs', 'yoghurt', 'milk', 'cheese', 'haloumi', 'whey',
+              'turkey', 'butter', 'honey', 'oyster'}
+    import re as _re
+    slip = [f"{r['name']}: {i['food']}" for r in vegan['recipes']
+            for i in r['ingredients']
+            if set(_re.findall(r'[a-z]+', i['food'].lower())) & animal
+            and 'butter beans' not in i['food'].lower()
+            and 'peanut butter' not in i['food'].lower()]
+    check('nothing from an animal in a vegan dish', not slip, '; '.join(slip[:2]))
+
+    print('a planned day is a breakfast, a lunch and a dinner')
+    r = c.post(f'/api/plans/{pid}/autoplan',
+               json={'days': 7, 'meals_per_day': 3, 'ceiling': 2100,
+                     'floor_protein': 150, 'floor_fibre': 30, 'apply': True})
+    res = r.json()
+    named = [[m.get('meal') for m in d['meals']] for d in res['days']]
+    check('every day names its sittings',
+          all(set(day) == {'breakfast', 'lunch', 'dinner'} for day in named),
+          str(named[0]))
+
+    lib = {x['id']: x for x in c.get('/api/recipes').json()['recipes']}
+    breakfasts = [lib[m['recipeId']]['name'] for d in res['days']
+                  for m in d['meals'] if m.get('meal') == 'breakfast'
+                  and m['recipeId'] in lib]
+    ragu_for_breakfast = [n for n in breakfasts
+                          if any(w in n.lower() for w in
+                                 ('ragu', 'curry', 'tray bake', 'braised'))]
+    check('nobody is served ragu for breakfast', not ragu_for_breakfast,
+          '; '.join(ragu_for_breakfast[:2]))
+
+    print('saving and clearing the shopping list')
+    plan = c.get(f'/api/plans/{pid}').json()['data']
+    plan['shop'] = {'Broccoli, raw': {'aisle': 'produce', 'grams': 500}}
+    plan['savedLists'] = {'Week one': {'savedAt': '2026-08-31',
+                                       'shop': dict(plan['shop']), 'prices': {}}}
+    c.put(f'/api/plans/{pid}', json={'data': plan})
+    back = c.get(f'/api/plans/{pid}').json()['data']
+    check('a saved list survives a round trip',
+          list((back.get('savedLists') or {}).keys()) == ['Week one'])
+    plan2 = dict(back)
+    plan2['shop'] = {}
+    c.put(f'/api/plans/{pid}', json={'data': plan2})
+    check('clearing empties the list',
+          not c.get(f'/api/plans/{pid}').json()['data']['shop'])
+    c.post(f'/api/plans/{pid}/undo')
+    check('undo brings the cleared list back',
+          bool(c.get(f'/api/plans/{pid}').json()['data']['shop']))
+
 print()
 print('FAILED: ' + ', '.join(fails) if fails else 'all checks passed')
 sys.exit(1 if fails else 0)

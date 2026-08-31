@@ -48,6 +48,31 @@ def _fit_score(candidate: Dict[str, float], gap: Dict[str, float]) -> float:
     return (protein_value * 2.0 + fibre_value * 1.4) / (candidate["kcal"] / 100.0)
 
 
+def sittings_for(meals_per_day: int) -> List[str]:
+    """The distinct sittings a day of this length has, in order."""
+    seen, out = set(), []
+    for name in _sittings(meals_per_day):
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+def _sittings(meals_per_day: int) -> List[str]:
+    """Name the sittings in a day of this length.
+
+    One meal is dinner; two are lunch and dinner; three are the obvious three.
+    Beyond that the extras are snacks between lunch and dinner, which in this
+    model means anything a lunch would allow.
+    """
+    if meals_per_day <= 1:
+        return ["dinner"]
+    if meals_per_day == 2:
+        return ["lunch", "dinner"]
+    extra = meals_per_day - 3
+    return ["breakfast", "lunch"] + ["lunch"] * extra + ["dinner"]
+
+
 def plan_week(
     library: Sequence[Dict[str, Any]],
     goals: Dict[str, float],
@@ -55,14 +80,20 @@ def plan_week(
     meals_per_day: int = 3,
     max_repeats: int = 3,
     allow_seconds: bool = True,
+    by_meal: bool = True,
 ) -> Dict[str, Any]:
     """Choose meals for each day so the day meets its targets.
 
-    Works down the day one meal at a time, each time taking whichever recipe
+    Works down the day one sitting at a time, each time taking whichever recipe
     best closes what is still missing within the calories left. A recipe can
     appear more than once -- meal prep is repetitive on purpose -- but not more
     than `max_repeats` times across the week, so the plan is not one dish
     seven days running.
+
+    With `by_meal` the sittings are named: breakfast, then lunch, then dinner,
+    and only recipes belonging to that sitting are considered. Without it the
+    numbers still work out and the day suggests chicken ragu for breakfast,
+    which is a plan nobody follows.
     """
     if not library:
         return {"days": [], "message": "There are no recipes to plan with."}
@@ -73,12 +104,23 @@ def plan_week(
 
     used_count: Dict[int, int] = {}
     out_days: List[Dict[str, Any]] = []
+    sittings = _sittings(meals_per_day) if by_meal else [None] * meals_per_day
+
+    # A recipe with nothing recorded predates meal slots, or was written by
+    # hand. Treating it as a main is the safer reading: an unlabelled dish is
+    # far more likely to be a dinner than a bowl of porridge.
+    def suits(recipe: Dict[str, Any], sitting: Optional[str]) -> bool:
+        if not sitting:
+            return True
+        listed = recipe.get("meals") or (
+            [recipe["meal"]] if recipe.get("meal") else None)
+        return sitting in (listed or ("lunch", "dinner"))
 
     for _ in range(days):
         total = {"kcal": 0.0, "p": 0.0, "c": 0.0, "f": 0.0, "fb": 0.0}
         chosen: List[Dict[str, Any]] = []
 
-        for slot in range(meals_per_day):
+        for slot, sitting in enumerate(sittings):
             gap = _shortfall(total, goals)
             slots_left = meals_per_day - slot
             # Leave room for the meals still to come, so the first two do not
@@ -88,6 +130,8 @@ def plan_week(
             best = None
             best_score = 0.0
             for recipe in usable:
+                if not suits(recipe, sitting):
+                    continue
                 if used_count.get(recipe["id"], 0) >= max_repeats:
                     continue
                 if any(c["recipeId"] == recipe["id"] for c in chosen):
@@ -110,14 +154,16 @@ def plan_week(
                     best, best_score = recipe, score
 
             if best is None:
-                break
+                # Nothing fits this sitting -- usually the library has no
+                # breakfast. Skip it rather than abandon the rest of the day.
+                continue
 
             m = _macros(best)
             for k in total:
                 total[k] += m[k]
             used_count[best["id"]] = used_count.get(best["id"], 0) + 1
             chosen.append({"recipeId": best["id"], "servings": 1, "on": True,
-                           "name": best.get("name", "")})
+                           "meal": sitting or "", "name": best.get("name", "")})
 
         # A day still short on protein with calories to spare gets a second
         # helping of whatever on it carries the most protein per calorie.

@@ -46,7 +46,7 @@ INGREDIENTS: Dict[str, Dict[str, Any]] = {
                                 pack=240, tags={"vegetarian", "vegan"}, cook="simmer", aisle="pantry", suits=frozenset("curry soup traybake bowl".split())),
     "Eggs": dict(kcal=143, p=12.6, c=0.7, f=9.5, fb=0.0,
                                 role="protein", query="Free Range Eggs 12 pack",
-                                pack=700, tags={"vegetarian"}, cook="pan", aisle="fridge", suits=frozenset("bowl stirfry".split())),
+                                pack=700, tags={"vegetarian"}, cook="pan", aisle="fridge", suits=frozenset("bowl stirfry eggs shakshuka breakfasthash frittata".split())),
     "Lamb leg, raw, diced": dict(kcal=143, p=20.2, c=0.0, f=6.6, fb=0.0,
                                 role="protein", query="Diced Lamb",
                                 pack=500, tags={"meat"}, cook="simmer", aisle="meat", suits=frozenset("stew braise curry tagine traybake soup".split())),
@@ -76,13 +76,22 @@ INGREDIENTS: Dict[str, Dict[str, Any]] = {
                                 pack=250, tags={"vegetarian"}, cook="pan", aisle="fridge", suits=frozenset("salad grill bowl traybake wrap".split())),
     "Cottage cheese": dict(kcal=98, p=11.0, c=3.4, f=4.3, fb=0.0,
                                 role="protein", query="Cottage Cheese",
-                                pack=500, tags={"vegetarian"}, cook="none", aisle="fridge", suits=frozenset("salad bowl bake".split())),
+                                pack=500, tags={"vegetarian"}, cook="none", aisle="fridge", suits=frozenset("salad bowl bake yoghurtbowl eggs".split())),
     "Black beans, drained": dict(kcal=132, p=8.9, c=16.0, f=0.5, fb=8.7,
                                 role="protein", query="Black Beans 400g tin",
                                 pack=250, tags={"vegetarian", "vegan"}, cook="simmer", aisle="pantry", suits=frozenset("wrap bowl soup stew salad".split())),
     "Brown lentils, drained": dict(kcal=116, p=9.0, c=12.0, f=0.4, fb=8.0,
                                 role="protein", query="Brown Lentils 400g tin",
                                 pack=250, tags={"vegetarian", "vegan"}, cook="simmer", aisle="pantry", suits=frozenset("ragu soup stew curry salad bake".split())),
+    "Greek yoghurt": dict(kcal=59, p=10.0, c=3.6, f=0.4, fb=0.0,
+                                role="protein", query="Greek Style Natural Yoghurt 1kg",
+                                pack=1000, tags={"vegetarian", "keto"}, cook="none", aisle="fridge", suits=frozenset("porridge yoghurtbowl smoothie salad".split())),
+    "Milk, skim": dict(kcal=35, p=3.4, c=5.0, f=0.1, fb=0.0,
+                                role="protein", query="Skim Milk 2L",
+                                pack=2000, tags={"vegetarian"}, cook="none", aisle="fridge", suits=frozenset("porridge smoothie".split())),
+    "Whey protein powder": dict(kcal=380, p=76.0, c=8.0, f=4.0, fb=1.0,
+                                role="protein", query="Whey Protein Powder",
+                                pack=1000, tags={"vegetarian", "keto"}, cook="none", aisle="pantry", suits=frozenset("smoothie yoghurtbowl porridge".split())),
     "Butter beans, drained": dict(kcal=110, p=7.0, c=15.0, f=0.5, fb=5.0,
                                 role="protein", query="Butter Beans 400g tin",
                                 pack=250, tags={"vegetarian", "vegan"}, cook="simmer", aisle="pantry", suits=frozenset("stew soup bake salad braise".split())),
@@ -99,13 +108,13 @@ INGREDIENTS: Dict[str, Dict[str, Any]] = {
                                 pack=500, tags={"vegan"}, aisle="pantry", suits=frozenset("ragu soup bowl".split())),
     "Rolled oats": dict(kcal=379, p=13.0, c=68.0, f=6.5, fb=10.0,
                                 role="base", query="Rolled Oats 1kg",
-                                pack=1000, tags={"vegan"}, aisle="pantry", suits=frozenset("".split())),
+                                pack=1000, tags={"vegan"}, aisle="pantry", suits=frozenset("porridge yoghurtbowl smoothie".split())),
     "Sweet potato, raw": dict(kcal=86, p=1.6, c=20.0, f=0.1, fb=3.0,
                                 role="base", query="Gold Sweet Potato",
-                                pack=1000, tags={"vegan", "gluten-free"}, aisle="produce", suits=frozenset("traybake bowl curry soup".split())),
+                                pack=1000, tags={"vegan", "gluten-free"}, aisle="produce", suits=frozenset("traybake bowl curry soup breakfasthash frittata".split())),
     "Potato, raw": dict(kcal=77, p=2.0, c=17.0, f=0.1, fb=2.2,
                                 role="base", query="Brushed Potatoes 2kg",
-                                pack=2000, tags={"vegan", "gluten-free"}, aisle="produce", suits=frozenset("traybake soup".split())),
+                                pack=2000, tags={"vegan", "gluten-free"}, aisle="produce", suits=frozenset("traybake soup breakfasthash frittata".split())),
     "Couscous, dry": dict(kcal=376, p=12.8, c=77.0, f=0.6, fb=5.0,
                                 role="base", query="Couscous 500g",
                                 pack=500, tags={"vegan"}, aisle="pantry", suits=frozenset("bowl traybake".split())),
@@ -170,7 +179,19 @@ INGREDIENTS: Dict[str, Dict[str, Any]] = {
     "Corn tortillas": dict(kcal=218, p=5.7, c=45.0, f=2.9, fb=6.3,
                                 role="base", query="Corn Tortillas 8 pack",
                                 pack=320, tags={"vegan"}, aisle="pantry",
-                                suits=frozenset("bowl traybake".split())),
+                                suits=frozenset("bowl traybake wrap".split())),
+    "Wholegrain bread": dict(kcal=247, p=10.0, c=38.0, f=3.5, fb=6.5,
+                                role="base", query="Wholegrain Bread Loaf",
+                                pack=700, tags={"vegan"}, aisle="bakery", suits=frozenset("eggs shakshuka frittata wrap".split())),
+    "Cauliflower rice": dict(kcal=25, p=1.9, c=3.0, f=0.3, fb=2.0,
+                                role="base", query="Cauliflower Rice",
+                                pack=500, tags={"vegan", "gluten-free", "keto"}, aisle="produce", suits=frozenset("stirfry curry bowl friedrice pilaf salad skillet".split())),
+    "Zucchini noodles": dict(kcal=17, p=1.2, c=3.1, f=0.3, fb=1.0,
+                                role="base", query="Zucchini Noodles",
+                                pack=400, tags={"vegan", "gluten-free", "keto"}, aisle="produce", suits=frozenset("ragu bake noodles salad skillet stirfry".split())),
+    "Konjac noodles": dict(kcal=8, p=0.2, c=3.0, f=0.1, fb=3.0,
+                                role="base", query="Slendier Konjac Noodles",
+                                pack=400, tags={"vegan", "gluten-free", "keto"}, aisle="pantry", suits=frozenset("noodles stirfry soup bowl".split())),
     "Quinoa, dry": dict(kcal=368, p=14.0, c=57.0, f=6.1, fb=7.0,
                                 role="base", query="Quinoa 500g",
                                 pack=500, tags={"vegan", "gluten-free"}, aisle="pantry", suits=frozenset("bowl salad pilaf traybake".split())),
@@ -185,7 +206,7 @@ INGREDIENTS: Dict[str, Dict[str, Any]] = {
                                 pack=500, tags={"vegan"}, aisle="bakery", suits=frozenset("wrap".split())),
     "Gnocchi": dict(kcal=158, p=3.5, c=32.0, f=1.0, fb=2.0,
                                 role="base", query="Potato Gnocchi 500g",
-                                pack=500, tags={"vegetarian"}, aisle="pantry", suits=frozenset("bake skillet ragu traybake".split())),
+                                pack=500, tags={"vegetarian"}, aisle="pantry", suits=frozenset("bake skillet ragu traybake frittata".split())),
     "Udon noodles": dict(kcal=130, p=4.5, c=27.0, f=0.5, fb=1.5,
                                 role="base", query="Udon Noodles",
                                 pack=400, tags={"vegan"}, aisle="pantry", suits=frozenset("noodles soup stirfry bowl".split())),
@@ -217,6 +238,15 @@ INGREDIENTS: Dict[str, Dict[str, Any]] = {
                                 role="veg", query="Cabbage", pack=1000,
                                 tags={"vegan", "gluten-free"}, aisle="produce",
                                 suits=frozenset()),
+    "Mixed berries, frozen": dict(kcal=48, p=1.0, c=8.0, f=0.3, fb=4.0,
+                                role="veg", query="Frozen Mixed Berries", pack=500,
+                                tags={"vegan", "gluten-free", "keto"}, aisle="freezer", suits=frozenset("porridge yoghurtbowl smoothie".split())),
+    "Banana": dict(kcal=89, p=1.1, c=20.0, f=0.3, fb=2.6,
+                                role="veg", query="Bananas", pack=1000,
+                                tags={"vegan", "gluten-free"}, aisle="produce", suits=frozenset("porridge yoghurtbowl smoothie".split())),
+    "Avocado": dict(kcal=160, p=2.0, c=1.8, f=15.0, fb=6.7,
+                                role="veg", query="Avocado", pack=200,
+                                tags={"vegan", "gluten-free", "keto"}, aisle="produce", suits=frozenset("eggs salad bowl wrap shakshuka".split())),
     "Cauliflower, raw": dict(kcal=25, p=1.9, c=3.0, f=0.3, fb=2.0,
                                 role="veg", query="Cauliflower", pack=1000,
                                 tags={"vegan", "gluten-free"}, aisle="produce", suits=frozenset("".split())),
@@ -316,6 +346,12 @@ INGREDIENTS: Dict[str, Dict[str, Any]] = {
                                 role="sauce", query="Tahini 385g", pack=385,
                                 tags={"vegan"}, aisle="pantry",
                                 serve_g=20, suits=frozenset()),
+    "Peanut butter": dict(kcal=598, p=25.0, c=20.0, f=50.0, fb=6.0,
+                                role="fat", query="Natural Peanut Butter",
+                                pack=500, tags={"vegan", "keto"}, aisle="pantry", serve_g=15, suits=frozenset("porridge smoothie yoghurtbowl".split())),
+    "Chia seeds": dict(kcal=486, p=17.0, c=42.0, f=31.0, fb=34.0,
+                                role="fat", query="Chia Seeds",
+                                pack=500, tags={"vegan", "keto"}, aisle="pantry", serve_g=12, suits=frozenset("porridge yoghurtbowl smoothie".split())),
     "Butter": dict(kcal=717, p=0.9, c=0.1, f=81.0, fb=0.0,
                                 role="fat", query="Butter 250g", pack=250,
                                 tags={"vegetarian"}, aisle="fridge",
@@ -569,6 +605,78 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
              "Microwave from the fridge: 800W for 2.5 minutes, stir, then 1 more minute.",
              "From frozen: 50% for 8 minutes, then full power for 2.",
 )),
+    dict(id="porridge", name="{base} porridge with {veg}",
+         roles=("protein", "base", "veg", "fat"), sauce=None,
+         steps=("Put the {base} and the {protein} in a pan over medium heat.",
+                "Stir until it thickens, about 5 minutes.",
+                "Fold the {veg} through at the end so it keeps its shape.",
+                "Top with the seeds or nut butter.",
+                "For the week ahead, portion it cold into jars and it sets overnight."),
+         storage="Fridge up to 4 days made ahead. It sets firm and loosens when warmed.",
+         reheat=(
+             "Microwave from the fridge: 800W for 90 seconds with a splash of milk, stir, then 30 seconds.",
+             "Good cold straight from the jar, which is the point of making it the night before.",
+)),
+    dict(id="yoghurtbowl", name="{protein} bowl with {veg} and {base}",
+         roles=("protein", "base", "veg", "fat"), sauce=None,
+         steps=("Toast the {base} in a dry pan for 3 minutes until it smells nutty.",
+                "Spoon the {protein} into jars or containers.",
+                "Add the {veg} on top.",
+                "Keep the toasted {base} and the seeds separate until you eat it, or it goes soft.",
+                "Assembles in twenty seconds in the morning."),
+         storage="Fridge up to 4 days. Keep anything crunchy in its own container.",
+         reheat=(
+             "Not reheated -- eaten cold from the fridge.",
+             "If the fruit was frozen, it thaws overnight and makes its own syrup.",
+)),
+    dict(id="smoothie", name="{veg} and {protein} smoothie with {base}",
+         roles=("protein", "base", "veg", "fat"), sauce=None,
+         steps=("Put the {veg}, {protein} and {base} in the blender.",
+                "Add 200ml of water or milk and the nut butter or seeds.",
+                "Blend 45 seconds until there is nothing left to chew.",
+                "Pour into a bottle and refrigerate.",
+                "For the week, freeze the fruit in bags and blend each morning."),
+         storage="Fridge up to 2 days; it separates but stirs back together. Freeze the fruit portions instead for longer.",
+         reheat=(
+             "Drunk cold. Shake it before opening -- it settles.",
+             "If it has thickened overnight, a splash of water brings it back.",
+)),
+    dict(id="eggs", name="{protein} on {base} with {veg}",
+         roles=("protein", "base", "veg", "fat"), sauce=None,
+         steps=("Cook the {veg} in the butter or oil until soft, about 4 minutes.",
+                "Add the {protein} and cook gently, stirring, until just set.",
+                "Take it off the heat while it still looks slightly underdone; it carries on cooking.",
+                "Toast the {base} and pile it on.",
+                "For the week, cook the vegetables ahead and do the eggs fresh -- they take two minutes."),
+         storage="Vegetables: fridge up to 4 days. Eggs are best cooked the morning you eat them.",
+         reheat=(
+             "Microwave the vegetables from the fridge: 800W for 60 seconds, then cook the eggs into them.",
+             "Reheated scrambled egg goes rubbery. This is the one worth doing fresh.",
+)),
+    dict(id="shakshuka", name="{protein} baked in {veg} with {base}",
+         roles=("protein", "base", "veg", "sauce", "fat"), sauce="Tomato passata",
+         steps=("Soften the {veg} in the oil for 8 minutes.",
+                "Add the {sauce} and simmer until it thickens, about 10 minutes.",
+                "Make wells and break the {protein} into them.",
+                "Cover and cook 6-8 minutes until the whites set.",
+                "Serve with the {base}. The sauce keeps all week; the eggs go in fresh."),
+         storage="Sauce: fridge up to 4 days, freezer up to 3 months. Cook the eggs into it when you eat.",
+         reheat=(
+             "Reheat the sauce in a pan, make the wells, and crack the eggs in. Eight minutes start to finish.",
+             "Microwave from the fridge: 800W for 2 minutes for the sauce alone.",
+)),
+    dict(id="breakfasthash", name="{protein} and {veg} hash with {base}",
+         roles=("protein", "base", "veg", "fat"), sauce=None,
+         steps=("Dice the {base} small and par-cook it for 6 minutes.",
+                "Fry it in the oil, pressed flat, until the edges crisp.",
+                "Add the {veg} and cook 4 minutes.",
+                "Add the {protein} and cook through.",
+                "Season well and cool before portioning."),
+         storage="Fridge up to 4 days, freezer up to 2 months.",
+         reheat=(
+             "A hot dry pan for 4 minutes is what brings the crisp edges back.",
+             "Microwave from the fridge: 800W for 2 minutes, stir, then 45 seconds. It will be soft, not crisp.",
+)),
     dict(id="crumbed", name="Crumbed {protein} with {base} and {veg}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
          steps=("Heat the oven to 200C and put a tray in to get hot.",
@@ -583,6 +691,63 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
 )
 
+# Nobody eats chicken breast ragu at seven in the morning. Each shape says when
+# it belongs, so a day is planned as a breakfast, a lunch and a dinner rather
+# than three interchangeable dinners.
+#
+# The split is not fussy: most savoury dishes work for either lunch or dinner,
+# a salad or a wrap leans to lunch, and a braise that takes ninety minutes is a
+# dinner. What matters is that breakfast is its own set.
+_MEAL_SLOTS: Dict[str, Sequence[str]] = {
+    "porridge": ("breakfast",),
+    "yoghurtbowl": ("breakfast",),
+    "smoothie": ("breakfast",),
+    "eggs": ("breakfast",),
+    "shakshuka": ("breakfast",),
+    "breakfasthash": ("breakfast",),
+    "salad": ("lunch",),
+    "wrap": ("lunch",),
+    "frittata": ("breakfast", "lunch"),
+    "bowl": ("lunch", "dinner"),
+    "soup": ("lunch", "dinner"),
+    "noodles": ("lunch", "dinner"),
+    "friedrice": ("lunch", "dinner"),
+    "stirfry": ("lunch", "dinner"),
+    "skillet": ("lunch", "dinner"),
+    "chowder": ("lunch", "dinner"),
+    "pilaf": ("lunch", "dinner"),
+    "traybake": ("dinner",),
+    "ragu": ("dinner",),
+    "curry": ("dinner",),
+    "bake": ("dinner",),
+    "stew": ("dinner",),
+    "braise": ("dinner",),
+    "grill": ("dinner",),
+    "tagine": ("dinner",),
+    "crumbed": ("dinner",),
+}
+
+MEALS: Sequence[str] = ("breakfast", "lunch", "dinner")
+
+# Shapes where even the vegetable has to name the dish. Everything else is
+# already governed by proteins and bases naming what they suit; this exists so
+# that "any vegetable works anywhere" does not put broccoli in the porridge.
+# Savoury breakfasts are deliberately not on this list -- a shakshuka wants
+# ordinary vegetables, and requiring them to opt in left it with none.
+_OPT_IN = frozenset(("porridge", "yoghurtbowl", "smoothie"))
+
+
+def meals_for(template_id: str) -> Sequence[str]:
+    """When this dish belongs. Unlisted shapes are treated as a main."""
+    return _MEAL_SLOTS.get(template_id, ("lunch", "dinner"))
+
+
+def templates_for_meal(meal: Optional[str]) -> List[str]:
+    if not meal or meal == "any":
+        return [t["id"] for t in TEMPLATES]
+    return [t["id"] for t in TEMPLATES if meal in meals_for(t["id"])]
+
+
 # A new dish shape starts with no ingredients willing to go in it: every
 # protein and base lists the templates it suits, and none of them had heard of
 # a tagine. Saying which existing shape each new one cooks like is both shorter
@@ -595,12 +760,10 @@ _COOKS_LIKE: Dict[str, Sequence[str]] = {
     "noodles": ("stirfry",),
     "friedrice": ("stirfry",),
     "salad": ("bowl",),
-    "wrap": ("bowl",),
     "grill": ("traybake", "stirfry"),
     "braise": ("soup", "curry"),
     "pilaf": ("curry", "bowl"),
     "chowder": ("soup",),
-    "frittata": ("bowl",),
     "tagine": ("curry",),
     "crumbed": ("traybake", "bowl"),
 }
@@ -612,6 +775,31 @@ for _meta in INGREDIENTS.values():
             new for new, like in _COOKS_LIKE.items()
             if any(old in _suits for old in like)}
 del _meta, _suits
+
+
+# Keto is a carbohydrate ceiling, so what belongs in it is decided by the
+# numbers already recorded rather than by a hand-kept list that would drift out
+# of step the moment an ingredient was added.
+#
+# The measure is net carbohydrate -- what is left after the fibre, which is not
+# absorbed -- because that is what the diet actually counts. Counting the total
+# instead gets it wrong in both directions: it throws out broccoli at 7g and
+# lets carrot in at 9.6g, when after fibre they are 4.4g and 6.8g.
+KETO_NET_CARB_LIMIT = 6.0        # grams per 100g of an ingredient
+# A serving has to add up as well as its parts: three hundred grams of a
+# vegetable that is inside the limit can still put the plate outside it.
+KETO_CARBS_PER_SERVING = 20.0
+
+
+def net_carbs(macros: Dict[str, Any]) -> float:
+    return max(0.0, (macros.get("c") or 0.0) - (macros.get("fb") or 0.0))
+
+
+for _name, _meta in INGREDIENTS.items():
+    if (net_carbs(_meta) <= KETO_NET_CARB_LIMIT
+            and _meta["role"] in ("protein", "base", "veg", "fat")):
+        _meta["tags"] = set(_meta.get("tags") or ()) | {"keto"}
+del _name, _meta
 
 
 # Minimum sensible amounts per serving, in grams.
@@ -688,6 +876,12 @@ def _by_role(role: str, diet: Optional[str], exclude: Sequence[str],
         suits = meta.get("suits")
         if template_id is not None and suits and template_id not in suits:
             continue
+        # An ingredient with no `suits` works anywhere in its role, which is
+        # right for a vegetable in a savoury dish and badly wrong at breakfast:
+        # it puts broccoli in the porridge. Breakfast shapes take only what
+        # names them.
+        if template_id in _OPT_IN and template_id not in (suits or ()):
+            continue
         if template_id is not None and suits is not None and not suits                 and meta["role"] in ("protein", "base"):
             continue
         if name.lower() in banned or any(b in name.lower() for b in banned):
@@ -700,6 +894,8 @@ def _by_role(role: str, diet: Optional[str], exclude: Sequence[str],
                 continue
             if diet == "pescatarian" and not (
                     {"pescatarian", "vegetarian", "vegan"} & tags):
+                continue
+            if diet == "keto" and "keto" not in tags:
                 continue
         out.append(name)
     return sorted(out)
@@ -1069,6 +1265,7 @@ def build_recipe(
     cuisine: str = "any",
     pick: Optional[Dict[str, str]] = None,
     fibre_per_serving: Optional[float] = None,
+    meal: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Compose one recipe meeting the targets, or None if nothing fits.
 
@@ -1079,9 +1276,21 @@ def build_recipe(
     """
     theme = CUISINES.get(cuisine or "any") or CUISINES["any"]
     allowed = theme.get("templates") or ()
+    for_meal = set(templates_for_meal(meal))
+
     templates = [t for t in TEMPLATES
                  if (not template_id or t["id"] == template_id)
-                 and (not allowed or t["id"] in allowed)]
+                 and (not allowed or t["id"] in allowed)
+                 and t["id"] in for_meal]
+    if not templates and meal and meal != "any":
+        # No theme lists a breakfast, and nor should they -- porridge is not
+        # Greek. Rather than refuse the meal, drop the theme for it and say so
+        # by not claiming the label.
+        theme = CUISINES["any"]
+        cuisine = "any"
+        templates = [t for t in TEMPLATES
+                     if (not template_id or t["id"] == template_id)
+                     and t["id"] in for_meal]
     if not templates:
         return None
 
@@ -1147,6 +1356,8 @@ def build_recipe(
             if diet == "pescatarian" and not (
                     {"pescatarian", "vegetarian", "vegan"} & tags):
                 continue
+            if diet == "keto" and "keto" not in tags:
+                continue
             extras[name] = grams
     else:
         sauce_name = template.get("sauce")
@@ -1206,6 +1417,8 @@ def build_recipe(
         pattern += " and {veg}"
     if "{base}" not in pattern:
         pattern += " on {base}"
+    if "{protein}" not in pattern:
+        pattern += " and {protein}"
     title = pattern.format(**labels)
     title = title[0].upper() + title[1:]
     if theme.get("label") and cuisine not in ("", "any"):
@@ -1237,6 +1450,9 @@ def build_recipe(
             for name, grams in sorted(
                 per_serve.items(), key=lambda kv: -kv[1])
         ],
+        "meal": (meals_for(template["id"])[0]
+                 if meal in (None, "any") else meal),
+        "meals": list(meals_for(template["id"])),
         "cuisine": cuisine if cuisine in CUISINES else "any",
         "cuisineLabel": theme.get("label", ""),
         "steps": ([s.format(**labels) for s in template["steps"]]
@@ -1343,16 +1559,19 @@ def build_best(
     cuisine: str = "any",
     tries: int = 14,
     start_offset: int = 0,
+    meal: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Build several candidates and return the one that best fits the targets."""
     t = {**DEFAULT_TARGETS, **(targets or {})}
+    if diet == "keto" and t.get("carbMax") is None:
+        t["carbMax"] = KETO_CARBS_PER_SERVING
     best = None
     best_score = None
     for step in range(max(1, tries)):
         candidate = _finish(build_recipe(
             seed, servings, t["kcal"], t["protein"], diet, exclude,
             offset=start_offset + step, cuisine=cuisine,
-            fibre_per_serving=t.get("fibreMin")))
+            fibre_per_serving=t.get("fibreMin"), meal=meal))
         if candidate is None:
             continue
         penalty = score_against(candidate["perServing"], t)
@@ -1381,31 +1600,48 @@ def build_plan(
     exclude: Sequence[str] = (),
     cuisine: str = "any",
     targets: Optional[Dict[str, Any]] = None,
+    meals_wanted: Optional[Sequence[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """Build several distinct recipes for one week's prep."""
+    """Build several distinct recipes for one week's prep.
+
+    `meals_wanted` spreads them over the day -- ask for nine with breakfast,
+    lunch and dinner and you get three of each, rather than nine dinners and a
+    week that suggests chicken ragu at seven in the morning.
+    """
     goals = {**DEFAULT_TARGETS, "kcal": kcal_per_serving,
              "protein": protein_per_serving, **(targets or {})}
     out: List[Dict[str, Any]] = []
     seen: set = set()
-    offset = 0
-    # Try well past `meals` so exclusions cannot silently return a short plan.
-    while len(out) < meals and offset < meals * 8:
-        recipe = build_best(seed, goals, servings, diet, exclude, cuisine,
-                            tries=4, start_offset=offset)
-        offset += 4
-        if not recipe:
-            continue
-        key = (recipe["template"], recipe["ingredients"][0]["food"])
-        if key in seen:
-            continue
-        seen.add(key)
-        recipe["id"] = f"{recipe['template']}-{len(out) + 1}"
-        out.append(recipe)
+
+    # Round-robin over the meals asked for, so nine dishes across three meals
+    # come back three, three and three rather than however the seed fell.
+    wanted = list(meals_wanted or [None])
+    quotas = [meals // len(wanted) + (1 if i < meals % len(wanted) else 0)
+              for i in range(len(wanted))]
+
+    for meal, quota in zip(wanted, quotas):
+        offset = 0
+        made = 0
+        # Try well past the quota so exclusions cannot silently return short.
+        while made < quota and offset < max(8, quota * 8):
+            recipe = build_best(seed, goals, servings, diet, exclude, cuisine,
+                                tries=4, start_offset=offset, meal=meal)
+            offset += 4
+            if not recipe:
+                continue
+            key = (recipe["template"], recipe["ingredients"][0]["food"])
+            if key in seen:
+                continue
+            seen.add(key)
+            recipe["id"] = f"{recipe['template']}-{len(out) + 1}"
+            out.append(recipe)
+            made += 1
     return out
 
 
 def combinations(cuisine: str = "any", diet: Optional[str] = None,
-                 exclude: Sequence[str] = ()) -> List[Dict[str, str]]:
+                 exclude: Sequence[str] = (),
+                 meal: Optional[str] = None) -> List[Dict[str, str]]:
     """Every dish this theme can make, in a stable but well-shuffled order.
 
     Enumerated in template order the list reads as twenty chicken tray bakes
@@ -1416,9 +1652,16 @@ def combinations(cuisine: str = "any", diet: Optional[str] = None,
     """
     theme = CUISINES.get(cuisine or "any") or CUISINES["any"]
     allowed = theme.get("templates") or ()
+    for_meal = set(templates_for_meal(meal))
+    # A theme has no breakfasts, so asking for one is asking for it untethered
+    # from the theme rather than for nothing at all.
+    if allowed and not (set(allowed) & for_meal):
+        allowed = ()
     out: List[Dict[str, str]] = []
     for template in TEMPLATES:
         tid = template["id"]
+        if tid not in for_meal:
+            continue
         if allowed and tid not in allowed:
             continue
         proteins = _pool_for("protein", cuisine, diet, exclude, tid)[0]
@@ -1429,10 +1672,29 @@ def combinations(cuisine: str = "any", diet: Optional[str] = None,
                 for veg in vegs:
                     out.append({"template": tid, "protein": protein,
                                 "base": base, "veg": veg})
-    out.sort(key=lambda c: hashlib.sha256(
-        f"{c['template']}|{c['protein']}|{c['base']}|{c['veg']}".encode()
-    ).hexdigest())
-    return out
+    # Sorting the whole list by a hash spreads the proteins nicely but not the
+    # shapes: a frittata has ninety-six combinations and a porridge six, so the
+    # opening page of breakfasts was six frittatas. Shuffle within each shape,
+    # then deal them out one shape at a time, so the first page shows what
+    # there is rather than whatever is most numerous.
+    by_shape: Dict[str, List[Dict[str, str]]] = {}
+    for combo in out:
+        by_shape.setdefault(combo["template"], []).append(combo)
+    for combos in by_shape.values():
+        combos.sort(key=lambda c: hashlib.sha256(
+            f"{c['template']}|{c['protein']}|{c['base']}|{c['veg']}".encode()
+        ).hexdigest())
+
+    dealt: List[Dict[str, str]] = []
+    shapes = sorted(by_shape)
+    round_no = 0
+    while len(dealt) < len(out):
+        for shape in shapes:
+            combos = by_shape[shape]
+            if round_no < len(combos):
+                dealt.append(combos[round_no])
+        round_no += 1
+    return dealt
 
 
 def browse(
@@ -1445,9 +1707,10 @@ def browse(
     protein_per_serving: float = 40,
     limit: int = 60,
     offset: int = 0,
+    meal: Optional[str] = None,
 ) -> Dict[str, Any]:
     """A page of the book, and how big the book is."""
-    combos = combinations(cuisine, diet if diet != "any" else None, exclude)
+    combos = combinations(cuisine, diet if diet != "any" else None, exclude, meal)
     total = len(combos)
 
     recipes: List[Dict[str, Any]] = []
@@ -1463,16 +1726,20 @@ def browse(
             kcal_per_serving=kcal_per_serving,
             protein_per_serving=protein_per_serving, diet=diet,
             exclude=exclude, template_id=combo["template"], cuisine=cuisine,
-            pick=combo))
+            pick=combo, meal=meal))
         if recipe is None:
             continue
         if category and recipe.get("category") != category:
             continue
+        if diet == "keto" and net_carbs(
+                recipe["perServing"]) > KETO_CARBS_PER_SERVING:
+            continue        # every part inside the limit, the plateful not
         recipe["id"] = (f"{cuisine}:{combo['template']}:{combo['protein']}"
                         f":{combo['base']}:{combo['veg']}")
         recipes.append(recipe)
 
-    return {"cuisine": cuisine, "total": total, "offset": offset,
+    return {"cuisine": cuisine, "meal": meal or "any", "total": total,
+            "offset": offset,
             "nextOffset": index if index < total else None,
             "count": len(recipes), "recipes": recipes}
 

@@ -221,6 +221,8 @@ class GenerateRequest(BaseModel):
     diet: str = Field(default="any", max_length=20)
     cuisine: str = Field(default="any", max_length=32)
     exclude: List[str] = Field(default_factory=list)
+    # Blank spreads them over the day: a breakfast, some lunches and dinners.
+    meal: str = Field(default="", max_length=16)
     price: bool = Field(default=True, description="Cost it from live prices.")
     stores: List[str] = Field(default_factory=lambda: list(stores.ALL_STORES))
 
@@ -588,6 +590,10 @@ def generate_recipes(
         kcal_per_serving=body.kcal_per_serving,
         protein_per_serving=body.protein_per_serving,
         diet=body.diet, exclude=body.exclude, cuisine=body.cuisine,
+        # One meal named builds only that; blank spreads them across the day
+        # rather than handing back five dinners.
+        meals_wanted=([body.meal] if body.meal
+                      else list(recipes.MEALS)),
     )
     shop = recipes.shopping_list(built)
 
@@ -637,6 +643,7 @@ def browse_recipes(
     cuisine: str = "any",
     diet: str = "any",
     category: str = "",
+    meal: str = "",
     kcal: float = 600,
     protein: float = 40,
     servings: int = 4,
@@ -651,6 +658,7 @@ def browse_recipes(
     """
     return recipes.browse(
         cuisine=cuisine, diet=diet, category=category or None,
+        meal=meal or None,
         servings=max(1, min(int(servings), 12)),
         kcal_per_serving=kcal, protein_per_serving=protein,
         limit=max(1, min(int(limit), 120)), offset=max(0, int(offset)))
@@ -817,6 +825,7 @@ def autoplan(
             protein_per_serving=max(
                 10.0, body.floor_protein / max(1, body.meals_per_day) * 1.15),
             diet=body.diet or "any", cuisine=body.cuisine or "any",
+            meals_wanted=weekplan.sittings_for(body.meals_per_day),
             # Without the fibre floor the builder optimises for calories and
             # protein alone, and every composed day then lands on target for
             # both and short on fibre -- which is exactly the miss the planner

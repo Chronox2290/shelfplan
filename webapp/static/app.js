@@ -271,11 +271,10 @@ function viewBuild() {
         ${(state.cuisines || [{ id: 'any', label: 'No theme' }]).map((c) =>
           `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}
       </select></div>
-      <div><label for="bDiet">Diet</label><select id="bDiet">
-        <option value="any">No restriction</option>
-        <option value="pescatarian">Pescatarian</option>
-        <option value="vegetarian">Vegetarian</option>
-        <option value="vegan">Vegan</option></select></div>
+      <div><label for="bDiet">Diet</label>
+        <select id="bDiet">${optionsFor(DIETS, 'any')}</select></div>
+      <div><label for="bMeal">Meal</label>
+        <select id="bMeal">${optionsFor(MEALS, '')}</select></div>
       <div><label for="bExcl">Exclude (comma separated)</label>
         <input id="bExcl" placeholder="e.g. mushrooms, tofu"></div>
     </div>
@@ -314,6 +313,7 @@ function wireBuild() {
         protein_per_serving: Number($('bProt').value),
         diet: $('bDiet').value,
         cuisine: ($('bCuisine') || {}).value || 'any',
+        meal: ($('bMeal') || {}).value || '',
         exclude: $('bExcl').value.split(',').map((x) => x.trim()).filter(Boolean),
         price: true,
       };
@@ -570,8 +570,15 @@ function recipeCard(r, opts) {
        ${r.storage ? `<p class="muted small">${esc(r.storage)}</p>` : ''}
        <ul class="steps">${r.reheat.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '';
 
-  const notes = (r.notes || '').trim()
-    ? `<p class="note small" style="margin-top:10px">${esc(r.notes)}</p>` : '';
+  // A saved recipe carries notes as the one string you typed; a freshly built
+  // one carries the builder's list of what it could not quite hit. Calling
+  // .trim() on the list threw, which is why "See it" in the book did nothing.
+  const noteList = Array.isArray(r.notes)
+    ? r.notes.filter(Boolean)
+    : (String(r.notes || '').trim() ? [String(r.notes).trim()] : []);
+  const notes = noteList.length
+    ? `<div class="note small" style="margin-top:10px">${noteList
+        .map((n) => `<div>${esc(n)}</div>`).join('')}</div>` : '';
 
   const controls = o.library ? `
       <div class="rating">${stars(r.id, r.rating)}</div>
@@ -590,6 +597,7 @@ function recipeCard(r, opts) {
 
   const cat = CAT_ORDER.includes(r.category) ? r.category : 'other';
   const tags = [
+    mealTag(r),
     r.cuisineLabel && r.cuisine !== 'any'
       ? `<span class="tag">${esc(r.cuisineLabel)}</span>` : '',
     r.source ? `<a class="tag" href="${esc(r.source)}" target="_blank"
@@ -798,7 +806,8 @@ function viewWeek() {
           <input type="checkbox" data-on="${di}:${mi}" ${off ? '' : 'checked'}>
           <span class="dot cat-${esc(categoryOf(r))}"></span>
           ${mealThumb(r)}
-          <span class="meal-name">${esc(r.name)}</span></label>
+          <span class="meal-name">${m.meal
+            ? `<span class="sitting">${esc(m.meal)}</span>` : ''}${esc(r.name)}</span></label>
         <div class="meal-controls">
           <input type="number" class="mult" data-mult="${di}:${mi}"
             value="${m.servings || 1}" min="1" max="9" title="Servings">
@@ -882,7 +891,8 @@ function viewShop() {
   const entries = Object.entries(shop);
   if (!entries.length) {
     return `<div class="card"><h2>Nothing on the list</h2>
-      <p class="sub">Plan a week, or build recipes, then come back.</p></div>`;
+      <p class="sub">Plan a week, or build recipes, then come back.</p></div>
+      ${savedListsPanel()}`;
   }
 
   const got = gotSet();
@@ -918,7 +928,7 @@ function viewShop() {
             ${thumb({ image: pic, name: food })}
             <div style="min-width:0"><label class="tick">
               <input type="checkbox" data-got="${esc(food)}"
-              ${ticked ? 'checked' : ''}> <span>${esc(food)}</span></label>
+              ${ticked ? 'checked' : ''}> <span class="shop-name">${esc(food)}</span></label>
             <div class="muted small">${meta.grams ? meta.grams + ' g' : ''}${
               packs > 1 ? ' &middot; ' + packs + ' packs' : ''}${
               p && p.matched ? ' &middot; ' + esc(p.matched) : ''}${link}</div>
@@ -943,7 +953,9 @@ function viewShop() {
       <div style="flex:1"><h2>Shopping list</h2>
         <p class="sub" style="margin:0">${got.size} of ${entries.length} in the basket</p></div>
       <button id="refreshBtn" class="primary">Refresh prices</button>
+      <button id="saveList">Save this list</button>
       <button id="clearGot" class="ghost">Untick all</button>
+      <button id="clearList" class="ghost danger">Clear list</button>
     </div>
     <div class="stats">
       <div class="stat"><div class="k">Basket total</div><div class="v">${money(total)}</div></div>
@@ -954,10 +966,115 @@ function viewShop() {
     <div class="scroll"><table>
       <thead><tr><th>Item</th><th class="r">Pack</th><th class="r">Price</th>
         <th class="r">Per kg</th><th class="r">Store</th></tr></thead>
-      <tbody>${sections}</tbody></table></div></div>`;
+      <tbody>${sections}</tbody></table></div></div>
+    ${savedListsPanel()}`;
+}
+
+// Saved lists live in the plan alongside everything else, so they travel with
+// an export and come back with an import rather than being stranded in one
+// browser.
+function savedLists() {
+  const d = state.plan.data;
+  d.savedLists = d.savedLists || {};
+  return d.savedLists;
+}
+
+function savedListsPanel() {
+  const saved = savedLists();
+  const names = Object.keys(saved).sort();
+  if (!names.length) return '';
+  return `<div class="card">
+    <h2>Saved lists</h2>
+    <p class="sub">Restoring one replaces what is on the list now. Undo is on
+      the Data tab.</p>
+    <div class="saved-list">${names.map((name) => {
+      const held = saved[name] || {};
+      const count = Object.keys(held.shop || {}).length;
+      return `<div class="saved-row">
+        <div style="flex:1;min-width:0">
+          <b class="clip">${esc(name)}</b>
+          <div class="muted small">${count} item${count === 1 ? '' : 's'}${
+            held.savedAt ? ' &middot; ' + esc(String(held.savedAt).slice(0, 10)) : ''}</div>
+        </div>
+        <button class="tiny" data-restore="${esc(name)}">Restore</button>
+        <button class="ghost tiny danger" data-forget="${esc(name)}">Forget</button>
+      </div>`;
+    }).join('')}</div></div>`;
 }
 
 function wireShop() {
+  const save = $('saveList');
+  if (save) save.addEventListener('click', async () => {
+    const suggested = 'List ' + new Date().toISOString().slice(0, 10);
+    const name = (prompt('Name for this list?', suggested) || '').trim();
+    if (!name) return;
+    const d = state.plan.data;
+    const lists = savedLists();
+    if (lists[name] && !confirm(`Replace the saved list called "${name}"?`)) return;
+    // A deep copy, or restoring it later would hand back whatever the live
+    // list had become in the meantime.
+    lists[name] = {
+      savedAt: new Date().toISOString(),
+      shop: JSON.parse(JSON.stringify(d.shop || {})),
+      prices: JSON.parse(JSON.stringify(d.prices || {})),
+    };
+    try {
+      await savePlan();
+      toast(`Saved as "${name}".`);
+      render();
+    } catch (err) { toast(err.message); }
+  });
+
+  const wipe = $('clearList');
+  if (wipe) wipe.addEventListener('click', async () => {
+    const count = Object.keys(state.plan.data.shop || {}).length;
+    if (!confirm(`Clear all ${count} items from the shopping list?\n\n`
+      + 'Recorded prices are kept, and Undo on the Data tab puts it back.')) return;
+    state.plan.data.shop = {};
+    state.plan.data.got = [];
+    try {
+      await savePlan();
+      toast('List cleared. Undo is on the Data tab.');
+      render();
+    } catch (err) { toast(err.message); }
+  });
+
+  document.querySelectorAll('[data-restore]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.restore;
+      const held = savedLists()[name];
+      if (!held) return;
+      if (!confirm(`Replace the current list with "${name}"?`)) return;
+      const d = state.plan.data;
+      d.shop = JSON.parse(JSON.stringify(held.shop || {}));
+      // Merge the prices rather than replace them: a price recorded since is
+      // newer than the one saved with the list, and history is worth keeping.
+      const prices = d.prices || {};
+      Object.entries(held.prices || {}).forEach(([food, history]) => {
+        if (!prices[food]) prices[food] = history;
+      });
+      d.prices = prices;
+      d.got = [];
+      try {
+        await savePlan();
+        toast(`Restored "${name}".`);
+        render();
+      } catch (err) { toast(err.message); }
+    });
+  });
+
+  document.querySelectorAll('[data-forget]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.forget;
+      if (!confirm(`Forget the saved list "${name}"?`)) return;
+      delete savedLists()[name];
+      try {
+        await savePlan();
+        render();
+      } catch (err) { toast(err.message); }
+    });
+  });
+
   document.querySelectorAll('[data-got]').forEach((box) => {
     box.addEventListener('change', async () => {
       const food = box.dataset.got;
@@ -2489,6 +2606,34 @@ function wireScanResult() {
   });
 }
 
+const MEALS = [
+  { id: '', label: 'Any meal' },
+  { id: 'breakfast', label: 'Breakfast' },
+  { id: 'lunch', label: 'Lunch' },
+  { id: 'dinner', label: 'Dinner' },
+];
+
+const DIETS = [
+  { id: 'any', label: 'No restriction' },
+  { id: 'pescatarian', label: 'Pescatarian' },
+  { id: 'vegetarian', label: 'Vegetarian' },
+  { id: 'vegan', label: 'Vegan' },
+  { id: 'keto', label: 'Keto' },
+];
+
+function optionsFor(list, chosen) {
+  return list.map((o) => `<option value="${esc(o.id)}"${
+    o.id === chosen ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
+}
+
+function mealTag(r) {
+  const meal = r && r.meal;
+  if (!meal) return '';
+  return `<span class="tag meal meal-${esc(meal)}">${
+    esc(meal[0].toUpperCase() + meal.slice(1))}</span>`;
+}
+
+
 /* --------------------------------------------------------- ingredient photos
 
 A generated recipe has no photograph of its own, and inventing one would be a
@@ -2591,8 +2736,8 @@ other question people actually ask, which is "show me what there is". Every
 combination the themes can make is walkable -- a couple of thousand per theme --
 so it pages rather than loading the lot.                                      */
 
-const book = { cuisine: 'any', category: '', recipes: [], total: 0,
-               next: 0, busy: false, open: false };
+const book = { cuisine: 'any', category: '', meal: '', diet: 'any',
+               recipes: [], total: 0, next: 0, busy: false, open: false };
 
 function bookPanel() {
   if (!book.open) {
@@ -2617,14 +2762,22 @@ function bookPanel() {
       <h2 style="flex:1;min-width:0;margin:0">The recipe book</h2>
       <button class="ghost tiny" id="bookClose">Close</button>
     </div>
-    <div class="row" style="margin-top:12px">
-      <div style="flex:1;min-width:150px">
+    <div class="grid g2" style="margin-top:12px">
+      <div>
+        <label for="bookMeal">Meal</label>
+        <select id="bookMeal">${optionsFor(MEALS, book.meal)}</select>
+      </div>
+      <div>
         <label for="bookCuisine">Theme</label>
         <select id="bookCuisine">${themes.map((c) =>
           `<option value="${esc(c.id)}" ${c.id === book.cuisine ? 'selected' : ''}
             >${esc(c.label)}</option>`).join('')}</select>
       </div>
-      <div style="flex:1;min-width:150px">
+      <div>
+        <label for="bookDiet">Diet</label>
+        <select id="bookDiet">${optionsFor(DIETS, book.diet)}</select>
+      </div>
+      <div>
         <label for="bookCat">Kind</label>
         <select id="bookCat">
           <option value="">Anything</option>
@@ -2656,6 +2809,7 @@ function bookTile(r) {
         <span class="dot cat-${esc(cat)}" style="margin-top:5px"></span>
         <b style="flex:1;min-width:0">${esc(r.name)}</b>
       </div>
+      <div class="tile-tags">${mealTag(r)}</div>
       <div class="macros num small">
         <span><b>${Math.round(per.kcal || 0)}</b> kcal</span>
         <span><b>${Math.round(per.p || 0)}</b>g protein</span>
@@ -2678,6 +2832,8 @@ async function loadBook(reset) {
   try {
     const res = await api('/recipes/browse?cuisine=' + encodeURIComponent(book.cuisine)
       + '&category=' + encodeURIComponent(book.category)
+      + '&meal=' + encodeURIComponent(book.meal)
+      + '&diet=' + encodeURIComponent(book.diet)
       + '&limit=24&offset=' + (book.next || 0));
     book.total = res.total;
     book.next = res.nextOffset;
@@ -2709,6 +2865,16 @@ function wireBook() {
   const cat = $('bookCat');
   if (cat) cat.addEventListener('change', () => {
     book.category = cat.value;
+    loadBook(true);
+  });
+  const meal = $('bookMeal');
+  if (meal) meal.addEventListener('change', () => {
+    book.meal = meal.value;
+    loadBook(true);
+  });
+  const bdiet = $('bookDiet');
+  if (bdiet) bdiet.addEventListener('change', () => {
+    book.diet = bdiet.value;
     loadBook(true);
   });
   const more = $('bookMore');
@@ -2791,6 +2957,8 @@ function autoPanel() {
         <select id="aCuisine">${(state.cuisines || [{ id: 'any', label: 'No theme' }])
           .map((c) => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}
         </select></div>
+      <div><label for="aDiet">Diet</label>
+        <select id="aDiet">${optionsFor(DIETS, 'any')}</select></div>
     </div>
     <div class="row" style="margin-top:14px">
       <button id="aGo" class="primary" ${auto.busy ? 'disabled' : ''}>${
@@ -2849,6 +3017,7 @@ function wireAuto() {
         floor_fibre: Number($('aFibre').value) || 25,
         max_repeats: Number($('aRepeat').value) || 3,
         cuisine: ($('aCuisine') || {}).value || 'any',
+        diet: ($('aDiet') || {}).value || 'any',
         apply: true,
       };
       auto.result = await api('/plans/' + state.planId + '/autoplan',

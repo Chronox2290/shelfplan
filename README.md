@@ -1262,3 +1262,66 @@ calories and protein but short on fibre, because nothing was ever told the
 fibre floor -- now that it is, the solver answers it the way a person would, by
 serving more vegetables and by choosing one that can carry it. A tomato is
 1.2g of fibre per 100g; no sane portion of it reaches 30g a day.
+
+## Breakfast, lunch and dinner
+
+A day was three interchangeable slots filled by whatever fit the numbers, which
+is how the planner came to suggest chicken breast ragu at seven in the morning.
+The numbers were right and the plan was useless.
+
+Every dish shape now says when it belongs, and six breakfast shapes were added
+-- porridge, a yoghurt bowl, a smoothie, eggs on toast, shakshuka, a breakfast
+hash -- along with the ingredients they need. A day is planned as a breakfast,
+then a lunch, then a dinner, each drawn only from dishes that belong there.
+
+Sweet breakfasts are fenced off in a way the savoury ones are not. An
+ingredient with no stated preference works anywhere in its role, which is
+right for a vegetable in a stir-fry and puts broccoli in the porridge; porridge,
+smoothies and yoghurt bowls take only what names them. A shakshuka wants
+ordinary vegetables, so it is deliberately not on that list.
+
+Two shapes were quietly wrong and are fixed with it: a frittata was inheriting
+every base a rice bowl allows, and a wrap was doing the same -- which is where
+"turkey mince wraps on egg noodles" came from.
+
+## Vegan and keto
+
+Vegan already worked; it simply was not offered everywhere it should have been.
+It is now on the builder, the book and the week planner, along with keto.
+
+Keto is decided by the numbers already recorded rather than a hand-kept list.
+The measure is **net** carbohydrate -- what is left after the fibre -- because
+that is what the diet counts, and counting the total gets it wrong in both
+directions: it throws out broccoli at 7g and lets carrot in at 9.6g, when after
+fibre they are 4.4g and 6.8g. Ingredients up to 6g per 100g qualify, and
+because a plate of qualifying parts can still add up past the limit, a listed
+keto dish is also checked to come in under 20g a serving.
+
+Three low-carb bases were added so a keto dish has something to sit on:
+cauliflower rice, zucchini noodles and konjac noodles.
+
+## The book's "See it" did nothing
+
+A saved recipe carries `notes` as the one line you typed. A freshly built one
+carries the builder's *list* of what it could not quite hit. The card called
+`.trim()` on it, which throws on a list, so the click died silently. It now
+takes either.
+
+## Reading it in an aisle
+
+The type was set for a monitor at arm's length: 13px secondary text, and most
+of this app is secondary text. Everything steps up, and the item name on the
+shopping list -- the thing you are actually scanning for one-handed in an
+aisle -- is now the largest thing on its row.
+
+The palette moved off cold grey onto warm paper so the cards have something to
+lift from, and the nine tabs became pills, which read as separate things and
+take a thumb better than a strip of underlined labels.
+
+## Keeping a list
+
+**Save this list** keeps a named copy, and **Clear list** empties it. Saved
+lists live in the plan itself rather than in one browser, so they survive an
+export and travel to another device. Restoring merges prices rather than
+replacing them -- a price recorded since is newer than the one saved with the
+list. Both are undoable from the Data tab.
