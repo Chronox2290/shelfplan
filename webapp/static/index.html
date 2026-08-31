@@ -161,6 +161,16 @@ tr:has(.tag.deal){background:var(--stop-soft)}
 .calendar.single{grid-template-columns:1fr}
 .calendar.single .day{max-width:640px;margin:0 auto;width:100%}
 
+/* choosing a different product for a line */
+.pick-meta b{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:14.5px}
+button.pick{width:100%;text-align:left;display:flex;gap:11px;align-items:center;
+  padding:9px 11px;border-radius:10px}
+button.pick:hover{border-color:var(--accent);background:var(--sunk)}
+/* .pick-body is a column, so a tag inside it stretches the full width unless
+   it is told not to. */
+.pick-body .tag{align-self:flex-start;width:fit-content}
+.pick-body b{font-weight:600;line-height:1.35}
+
 .spend{margin:12px 0 0;padding:11px 13px;background:var(--sunk);border-radius:10px}
 .spend-row{display:flex;justify-content:space-between;gap:14px;padding:3px 0;
   font-size:14.5px}

@@ -1158,6 +1158,8 @@ function viewShop() {
               p && p.price ? 'edit' : 'set'}</button></td>
           <td class="r num muted" data-label="Per kg">${kg ? money(kg) + '/kg' : '&mdash;'}</td>
           <td class="r muted small" data-label="Store">${esc((p && p.store) || '')}
+            <button class="ghost tiny" data-swap="${esc(food)}"
+              title="Choose a different product for this line">swap</button>
             <button class="ghost tiny" data-drop="${esc(food)}" title="Remove from list">&times;</button></td>
         </tr>`;
       }).join('');
@@ -1314,6 +1316,10 @@ function wireShop() {
         toast('That tick did not save: ' + err.message);
       }
     });
+  });
+
+  document.querySelectorAll('[data-swap]').forEach((b) => {
+    b.addEventListener('click', () => openSwap(b.dataset.swap));
   });
 
   document.querySelectorAll('[data-drop]').forEach((b) => {
@@ -1478,6 +1484,153 @@ const PRICE_SORTS = [
   { id: 'cheap', label: 'Cheapest per kilo' },
   { id: 'readings', label: 'Most readings' },
 ];
+
+const swap = { food: '', busy: false, items: [], q: '', live: false };
+
+function openSwap(food) {
+  swap.food = food;
+  swap.items = [];
+  swap.q = '';
+  swap.live = false;
+  const host = document.createElement('div');
+  host.id = 'swapHost';
+  document.body.appendChild(host);
+  drawSwap();
+  loadSwap();
+}
+
+function closeSwap() {
+  const host = $('swapHost');
+  if (host) host.remove();
+}
+
+function drawSwap() {
+  const host = $('swapHost');
+  if (!host) return;
+  const meta = (state.plan.data.shop || {})[swap.food] || {};
+  const now = latestPrice(swap.food);
+
+  host.innerHTML = `<div class="sheet-back" id="swapBack"></div>
+    <div class="sheet" role="dialog" aria-label="Choose a product">
+      <div class="sheet-top">
+        <div style="flex:1;min-width:0">
+          <h3 style="margin:0">${esc(shortFood(swap.food))}</h3>
+          <p class="muted small" style="margin:3px 0 0">Currently ${now && now.matched
+            ? `<b>${esc(now.matched)}</b> at ${money(now.price)}`
+            : 'not matched to a product'}</p>
+        </div>
+        <button class="ghost" id="swapClose">Close</button>
+      </div>
+      <div class="row">
+        <input id="swapFind" type="search" value="${esc(swap.q)}"
+          placeholder="search for something else" style="flex:1"
+          autocomplete="off">
+        <button class="ghost" id="swapLive" title="Ask the store for anything
+the catalogue has not seen">Search the store</button>
+      </div>
+      <div class="sheet-body" style="margin-top:12px">
+        ${swap.busy ? '<div class="note">Looking&hellip;</div>' : ''}
+        ${!swap.busy && !swap.items.length
+          ? '<p class="muted">Nothing found. Try searching the store.</p>' : ''}
+        <div class="pick-list">${swap.items.map(swapRow).join('')}</div>
+      </div>
+    </div>`;
+
+  $('swapBack').addEventListener('click', closeSwap);
+  $('swapClose').addEventListener('click', closeSwap);
+  const live = $('swapLive');
+  if (live) live.addEventListener('click', () => { swap.live = true; loadSwap(); });
+  const find = $('swapFind');
+  if (find) {
+    find.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { swap.q = find.value; swap.live = false; loadSwap(); }
+    });
+    if (swap.q) { find.focus(); find.setSelectionRange(swap.q.length, swap.q.length); }
+  }
+  host.querySelectorAll('[data-take]').forEach((b) => {
+    b.addEventListener('click', () => takeSwap(Number(b.dataset.take)));
+  });
+}
+
+function swapRow(p, i) {
+  const perKg = p.per_kg ? `${money(p.per_kg)}/kg` : '';
+  return `<button class="pick" data-take="${i}">
+    ${thumb(p)}
+    <span class="pick-body">
+      <b>${esc(p.name)}</b>${p.on_special
+        ? ' <span class="tag deal">SPECIAL</span>' : ''}
+      <span class="muted small">${esc(p.package_size || '')}${
+        perKg ? ' &middot; ' + perKg : ''}${
+        (p.flags || []).length ? ' &middot; ' + esc(p.flags.join(', ')) : ''}</span>
+    </span>
+    <span class="pick-meta num"><b>${money(p.pack_price)}</b></span>
+  </button>`;
+}
+
+async function loadSwap() {
+  swap.busy = true;
+  drawSwap();
+  const meta = (state.plan.data.shop || {})[swap.food] || {};
+  try {
+    const res = await api('/alternatives?food=' + encodeURIComponent(swap.food)
+      + '&query=' + encodeURIComponent(swap.q || meta.woo || swap.food)
+      + (meta.pack ? '&pack=' + encodeURIComponent(meta.pack) : '')
+      + (swap.live ? '&live=true' : ''));
+    swap.items = res.products || [];
+  } catch (err) {
+    swap.items = [];
+    toast(err.message);
+  }
+  swap.busy = false;
+  drawSwap();
+}
+
+async function takeSwap(index) {
+  const p = swap.items[index];
+  if (!p) return;
+  const d = state.plan.data;
+  const shop = d.shop || (d.shop = {});
+  const line = shop[swap.food] || (shop[swap.food] = { aisle: 'pantry' });
+
+  // The pack size moves with the product, so the packs needed have to be
+  // worked out again -- keeping the old count would price the new tin by the
+  // old tin's arithmetic.
+  if (p.pack_g) {
+    line.pack = p.pack_g;
+    if (line.grams) line.packsNeeded = Math.max(1, Math.ceil(line.grams / p.pack_g));
+  }
+  if (p.image) line.image = p.image;
+  if (p.url) line.url = p.url;
+  line.stockcode = String(p.stockcode || '');
+  // Remember the choice, so a later refresh does not quietly undo it.
+  line.pinned = p.name;
+
+  const prices = d.prices || (d.prices = {});
+  const history = prices[swap.food] || (prices[swap.food] = []);
+  const today = new Date().toISOString().slice(0, 10);
+  const record = {
+    price: p.pack_price, pack: p.pack_g || line.pack || null, date: today,
+    store: p.store || 'Woolworths (online)', source: 'chosen by hand',
+    matched: p.name, url: p.url || '',
+  };
+  if (p.on_special) record.onSpecial = true;
+  if (p.was_price) record.wasPrice = p.was_price;
+  if (history.length && history[history.length - 1].date === today) {
+    history[history.length - 1] = record;
+  } else {
+    history.push(record);
+  }
+
+  closeSwap();
+  try {
+    await savePlan();
+    toast(`Swapped to ${p.name}.`);
+  } catch (err) {
+    toast(err.message);
+  }
+  render();
+}
+
 
 function viewPrices() {
   const prices = state.plan.data.prices || {};

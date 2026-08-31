@@ -1587,3 +1587,31 @@ ignores any that are not yours or no longer exist, and an empty list is
 refused. Recipes are not covered by the plan's undo, so the confirmation says
 plainly that this one cannot be taken back and that days still using them will
 say the recipe is missing.
+
+## Swapping the product behind a line
+
+The matcher is right most of the time and wrong some of the time, and when it
+was wrong the only recourse was to correct the price by hand -- which fixes the
+number and leaves the line still pointing at the wrong tin, ready to be
+overwritten on the next refresh.
+
+**swap** on any shopping row opens the alternatives, ranked the way the
+resolver ranks them, each with its pack size, price per kilo and shelf price,
+and specials flagged. There is a search box for something else entirely, and a
+button to ask the store for anything the catalogue has not seen.
+
+Choosing one takes its price, pack size, picture and link with it, and works
+the packs needed out again -- keeping the old count would price the new tin by
+the old tin's arithmetic.
+
+### And it stays swapped
+
+A choice is recorded against the line as a stockcode plus the name that was
+picked. A price refresh re-prices *that* product rather than re-resolving,
+because re-resolving would hand the line straight back to the match that was
+just rejected: swapping would appear to work and then quietly undo itself an
+hour later.
+
+A line only counts as chosen when somebody chose it. Matching on stockcode
+alone would also catch the lines the resolver filled in itself, and those
+should carry on being re-matched as prices and stock move.

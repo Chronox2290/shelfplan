@@ -340,6 +340,30 @@ def cache_status(session: Session) -> Dict[str, Any]:
     }
 
 
+def pinned_product(session: Session,
+                   meta: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The exact product a shopping line was pointed at, if it was.
+
+    A line only counts as pinned when somebody chose it: `pinned` carries the
+    name they picked, and `stockcode` says which product. Matching on stockcode
+    alone would also catch lines the resolver happened to fill in, and those
+    should keep being re-resolved.
+    """
+    if not meta.get("pinned") or not meta.get("stockcode"):
+        return None
+    row = session.scalars(
+        select(Product).where(Product.stockcode == str(meta["stockcode"]))
+    ).first()
+    if row is None or row.pack_price is None:
+        return None
+    return {
+        "name": row.name, "pack_price": row.pack_price, "pack_g": row.pack_g,
+        "per_kg": row.per_kg, "on_special": row.on_special,
+        "was_price": row.was_price, "url": row.url, "image": row.image,
+        "store": row.store, "stockcode": row.stockcode,
+    }
+
+
 def catalogue_search(
     session: Session,
     query: str = "",

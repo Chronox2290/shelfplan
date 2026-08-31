@@ -1230,6 +1230,36 @@ def refresh_prices(
         previous = history[-1] if history else None
         target_pack = (previous or {}).get("pack") or (meta or {}).get("pack")
 
+        # A product chosen by hand stays chosen. Re-resolving would hand the
+        # line straight back to the match that was rejected, so swapping would
+        # appear to work and then quietly undo itself on the next refresh.
+        pinned = pricing.pinned_product(session, meta or {})
+        if pinned:
+            record = {
+                "price": pinned["pack_price"],
+                "pack": pinned.get("pack_g") or target_pack,
+                "date": today,
+                "store": pinned.get("store") or "woolworths",
+                "source": "chosen by hand",
+                "matched": pinned.get("name", ""),
+            }
+            if pinned.get("url"):
+                record["url"] = pinned["url"]
+            if pinned.get("on_special"):
+                record["onSpecial"] = True
+            if pinned.get("was_price"):
+                record["wasPrice"] = pinned["was_price"]
+            if history and history[-1].get("date") == today:
+                history[-1] = record
+            else:
+                history.append(record)
+            prices[food] = history
+            if pinned.get("image") and not shop.get(food, {}).get("image"):
+                shop.setdefault(food, {})["image"] = pinned["image"]
+            applied.append({"food": food, "price": record["price"],
+                            "matched": record["matched"], "pinned": True})
+            continue
+
         comparison = pricing.compare_food(
             session, food, (meta or {}).get("woo") or food,
             target_pack_g=target_pack, store_names=body.stores)
@@ -1552,6 +1582,65 @@ def catalogue(
     return pricing.catalogue_search(
         session, query=q, store=store, on_special=on_special,
         sort=sort, limit=limit, offset=offset)
+
+
+@app.get("/api/alternatives")
+def alternatives(
+    food: str = Query(..., min_length=1, max_length=200),
+    query: str = Query("", max_length=200),
+    pack: Optional[float] = Query(None, ge=1, le=50000),
+    limit: int = Query(12, ge=1, le=40),
+    live: bool = Query(False),
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Other products that would do for a shopping line, best first.
+
+    The resolver's own ranking, so the order here is the order it would have
+    picked in -- which is the useful thing to see when you disagree with what
+    it picked. Prices come from the catalogue; `live` goes to the store for
+    anything it has not seen, which is slower and rate limited.
+    """
+    term = (query or food).strip()
+    if live:
+        found = pricing.search(session, term, limit=36, store="woolworths")
+        products = found.get("products") or []
+    else:
+        products = pricing.catalogue_search(
+            session, query=term, store="woolworths", limit=40).get("products") or []
+        if not products:
+            plain = food.split(",")[0]
+            for attempt in (plain, " ".join(plain.split()[:2])):
+                products = (pricing.catalogue_search(
+                    session, query=attempt, store="woolworths",
+                    limit=40).get("products") or [])
+                if products:
+                    break
+
+    wanted = f"{term} {food}"
+    ranked = sorted(
+        (p for p in products if p.get("pack_price")),
+        key=lambda p: resolve.score(p, wanted, pack), reverse=True)[:limit]
+
+    return {
+        "food": food,
+        "query": term,
+        "count": len(ranked),
+        "products": [{
+            **p,
+            # So the page can show why one is above another rather than just
+            # asserting an order.
+            "match": round(resolve.name_similarity(wanted, p.get("name", "")), 2),
+            "flags": [note for note, hit in (
+                ("a prepared form", resolve.form_penalty(wanted, p.get("name", ""))),
+                ("a cut you did not ask for",
+                 resolve.processed_penalty(wanted, p.get("name", ""))),
+                ("a mixture", resolve.mixture_penalty(wanted, p.get("name", ""))),
+                ("contradicts the plan",
+                 resolve.conflict_penalty(wanted, p.get("name", ""))),
+            ) if hit],
+        } for p in ranked],
+    }
 
 
 @app.get("/api/catalogue/stats")
