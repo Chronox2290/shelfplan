@@ -1966,3 +1966,43 @@ product goes through `esc`, and the two places that do not are `toast()` and
 `confirm()`, which take text rather than markup. Imported URLs are checked
 against `^https?://` before they can become an `href`, so none can be a
 `javascript:` link. Secrets are all out of git.
+
+## The interface-design skill
+
+[interface-design](https://github.com/Dammyjay93/interface-design) by Damola
+Akinleye, MIT, installed under `.claude/`. Its own release hook, packaging
+metadata and other-host config were left behind — see
+`.claude/skills/interface-design/ATTRIBUTION.md` for what was and was not
+copied, and why. Nothing installed reaches the network or runs a command; it
+is guidance, and it was read before being installed.
+
+`.interface-design/system.md` records the direction so it does not get
+re-decided every session: who this is for, the two moments it is used in, the
+colour world, the token names, and the patterns worth holding to.
+
+### What its checks caught
+
+The token test passed — `--ink`, `--ground`, `--rule`, `--sunk` belong to this
+product's world rather than to any project, which is the thing that test is
+for. Seven other things did not:
+
+* **Eleven different border radii** — 3, 5, 6, 7, 8, 9, 10, 11, 12, 14 and a
+  pill. That is not a scale, it is eleven decisions nobody made. Four tokens
+  now, and every value maps to one.
+* **`tabular-nums` in one place**, in an app that is almost entirely numbers.
+  Prices, grams, calories and protein all changed width as they updated.
+  It is on the root now.
+* **No custom easing anywhere.** Browser defaults are weak and read as
+  untuned.
+* **No press feedback** — a tap on a phone gave nothing back.
+* **Tap targets of 30px and 34px** on the swap, edit and remove buttons. Those
+  are pressed one-handed in a supermarket aisle. 40px is the floor now, with
+  the compact size returning only under `@media (pointer: fine)` — a mouse is
+  precise, a thumb holding a trolley is not.
+* **No font smoothing**, and body text with no `text-wrap: pretty`.
+
+The skill's framing is what made the tap-target one obvious. "Who is this
+human, and where are they when they open this" is a different question from
+"is this accessible", and it gives a different answer: not a general
+concession to accessibility, but the specific fact that this app is used in an
+aisle with one hand.
