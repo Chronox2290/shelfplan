@@ -799,17 +799,24 @@ def ingredient_prices(session: Session) -> Dict[str, Dict[str, Any]]:
         # come from the same place the price did. Leaving it out is why a
         # shopping line kept whatever image it was first given, however wrong.
         picture = result.get("image") or ""
+        link = result.get("url") or ""
         if best.get("name") and best["name"] != result.get("matched_name"):
             match = next((x for x in products
                           if x.get("name") == best["name"]), None)
+            # The link has to move with the picture and the price. Leaving it
+            # behind is how a line ended up showing one product, costing
+            # another, and linking to a third.
             picture = (match or {}).get("image") or ""
+            link = (match or {}).get("url") or ""
         out[food] = {
             "price": best.get("pack_price") or result["price"],
             "pack": best.get("pack_g") or meta.get("pack"),
             "product": best.get("name") or result.get("matched_name", ""),
             "perKg": best.get("per_kg") or result.get("per_kg"),
             "image": picture,
-            "url": result.get("url") or "",
+            "url": link,
+            "stockcode": str((best.get("stockcode")
+                              or result.get("stockcode") or "")),
         }
     return out
 

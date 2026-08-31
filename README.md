@@ -1853,3 +1853,23 @@ much to buy. Three places for two facts, one of them wrong.
 A brand, a picker with a 180px floor and four buttons in one wrapping flex row
 made a different ragged shape at every width. Below 700px the picker takes a
 row of its own and its buttons share it evenly.
+
+## One product, another price, a third link
+
+The broccoli line still opened a bag of Birds Eye frozen mixed vegetables after
+the picture had been corrected, because the picture was only ever half the
+line. A shopping row draws its name, price and link from the stored **price
+reading**, and that reading still held the old match: `Birds Eye Frozen Carrot
+Cauliflower & Broccoli, $6.50, /productdetails/217969`.
+
+Two things were wrong. The price table returned the chosen product's image but
+the *resolver's* URL, so where a cheaper equivalent won on price the link stayed
+behind — one product shown, another costed, a third linked. The link now moves
+with the picture and the price, and the stockcode with it.
+
+And a reading matched to the wrong product is not an observation of that food
+at all. Leaving it in the history is worse than useless: it feeds the trend line
+and the "cheapest yet" verdict with the price of something else. Readings whose
+matched product the current matcher rejects — a mixture, a prepared form, a
+contradicted qualifier, tinned where fresh was wanted — are dropped rather than
+kept as data.
