@@ -1615,3 +1615,45 @@ hour later.
 A line only counts as chosen when somebody chose it. Matching on stockcode
 alone would also catch the lines the resolver filled in itself, and those
 should carry on being re-matched as prices and stock move.
+
+## Prices that keep themselves up to date
+
+They did not. Nothing was scheduled, so a plan's price history only moved when
+somebody pressed **Refresh prices** — which makes the history sparse and the
+"cheapest yet" verdict weak. A run of readings taken whenever a person happened
+to open the page says much less than one reading a week taken on the same day.
+
+Woolworths and Coles both start their new specials on a **Wednesday**, so that
+is the day worth reading. `webapp/autoprice.py` walks every plan once a week,
+early on Wednesday, and appends that day's price to any line not read in the
+last five days. The Prices tab says when it last ran and when it next will, and
+has a **Check now** button.
+
+Two rules keep it from becoming a nuisance:
+
+* It reads the **catalogue**, never the shops — nothing in it makes an outbound
+  request. Keeping the catalogue fresh is the trickle job's business, and that
+  is already paced for it.
+* A line you pinned by hand keeps the product you chose, exactly as a manual
+  refresh does. A shaky match is skipped rather than written: better a gap in
+  the history than a wrong reading in it.
+
+`AUTO_PRICE=0` turns it off; `AUTO_PRICE_DAY` and `AUTO_PRICE_HOUR` move it.
+
+## Where a recipe came from
+
+Three ways one gets into the library, and they are worth telling apart: the
+ones **you wrote**, the ones **from the web**, and the ones the builder made up
+to hit a number. A "Where from" filter and a tag on the card.
+
+## The book, and the plans
+
+The recipe book has moved to the top of the **Recipes** tab, which is where you
+go looking for a recipe — it was filed under the builder, which is where you go
+to describe one.
+
+Plans can be renamed and deleted. Both endpoints already existed; there was
+simply no way to reach them, so a plan once made was permanent. Deleting says
+what goes with it — the week, the shopping list, the saved lists, the price
+history — because none of that is covered by Undo, which only reaches back
+through versions of a plan that still exists.

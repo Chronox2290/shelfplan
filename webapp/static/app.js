@@ -138,6 +138,47 @@ $('newPlan').addEventListener('click', async () => {
   render();
 });
 
+$('renamePlan').addEventListener('click', async () => {
+  const current = (state.plans.find((p) => p.id === state.planId) || {}).name || '';
+  const name = (prompt('Rename this plan to?', current) || '').trim();
+  if (!name || name === current) return;
+  try {
+    await api('/plans/' + state.planId, { method: 'PUT', body: { name } });
+    await loadPlans();
+    toast(`Renamed to "${name}".`);
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+$('deletePlan').addEventListener('click', async () => {
+  const plan = state.plans.find((p) => p.id === state.planId);
+  if (!plan) return;
+  // Everything in a plan goes with it -- the week, the shopping list, the
+  // price history, the saved lists -- and none of that is covered by Undo,
+  // which only reaches back through versions of a plan that still exists.
+  if (!window.confirm(`Delete the plan "${plan.name}"?\n\nIts week, shopping `
+    + 'list, saved lists and price history go with it. This cannot be undone. '
+    + 'Your recipe library is kept.')) return;
+  try {
+    await api('/plans/' + state.planId, { method: 'DELETE' });
+    state.planId = null;
+    state.plan = null;
+    await loadPlans();
+    if (!state.plans.length) {
+      const made = await api('/plans', { method: 'POST',
+        body: { name: 'My plan', data: emptyPlan() } });
+      state.planId = made.id;
+      await loadPlans();
+    }
+    await loadPlan();
+    toast(`Deleted "${plan.name}".`);
+    render();
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
 function emptyPlan() {
   return { meta: { title: 'New plan' }, foods: {}, shop: {}, prices: {},
            aisles: ['produce', 'meat', 'fridge', 'pantry', 'freezer'],
@@ -213,9 +254,9 @@ function render() {
   if (state.tab === 'shop') wireShop();
   if (state.tab === 'data') wireData();
   if (state.tab === 'prices') wirePrices();
-  if (state.tab === 'build') { wireBuild(); wireBook(); }
+  if (state.tab === 'build') wireBuild();
   if (state.tab === 'week') { wireAuto(); wireWeek(); }
-  if (state.tab === 'recipes') wireRecipes();
+  if (state.tab === 'recipes') { wireBook(); wireRecipes(); }
   if (state.tab === 'findrec') wireFindRecipe();
   if (state.tab === 'own') wireOwn();
 }
@@ -287,8 +328,7 @@ function viewBuild() {
     <p class="muted small" style="margin:8px 0 0">
       <b>Build and price</b> makes a full week and costs it.
       <b>Offer me choices</b> proposes a few different meals so you can pick.</p>
-    <div id="bOut" style="margin-top:16px"></div></div>
-    ${bookPanel()}`;
+    <div id="bOut" style="margin-top:16px"></div></div>`;
 }
 
 function wireBuild() {
@@ -597,8 +637,11 @@ function recipeCard(r, opts) {
     ? `<button class="tiny" data-add="${r.id}">Add to a day</button>` : '';
 
   const cat = CAT_ORDER.includes(r.category) ? r.category : 'other';
+  const origin = { mine: 'yours', imported: '', built: 'built to targets' }[
+    recipeSource(r)];
   const tags = [
     mealTag(r),
+    origin ? `<span class="tag">${esc(origin)}</span>` : '',
     r.cuisineLabel && r.cuisine !== 'any'
       ? `<span class="tag">${esc(r.cuisineLabel)}</span>` : '',
     r.source ? `<a class="tag" href="${esc(r.source)}" target="_blank"
@@ -621,7 +664,23 @@ function recipeCard(r, opts) {
     ${controls ? `<div class="recipe-foot">${controls}</div>` : ''}</div>`;
 }
 
-const libView = { q: '', meal: '', cat: '', sort: 'best' };
+const libView = { q: '', meal: '', cat: '', sort: 'best', from: '' };
+
+// Three ways a recipe gets into the library, and they are worth telling apart:
+// the ones you wrote are yours, the ones off a website belong to whoever wrote
+// them, and the rest the builder made up to hit a number.
+const SOURCES = [
+  { id: '', label: 'Everything' },
+  { id: 'mine', label: 'My recipes' },
+  { id: 'imported', label: 'From the web' },
+  { id: 'built', label: 'Built for me' },
+];
+
+function recipeSource(r) {
+  if (r.ownRecipe) return 'mine';
+  if (r.sourceUrl || r.source) return 'imported';
+  return 'built';
+}
 
 const LIB_SORTS = [
   { id: 'best', label: 'Best rated first' },
@@ -642,6 +701,7 @@ function libShown() {
     if (libView.meal && !(r.meals || (r.meal ? [r.meal] : ['lunch', 'dinner']))
       .includes(libView.meal)) return false;
     if (libView.cat && categoryOf(r) !== libView.cat) return false;
+    if (libView.from && recipeSource(r) !== libView.from) return false;
     if (!needle) return true;
     // Searching the ingredients too, because "what can I do with the mince in
     // the fridge" is the question a library actually gets asked.
@@ -668,9 +728,10 @@ function libShown() {
 function viewRecipes() {
   const list = state.recipes || [];
   if (!list.length) {
-    return `<div class="card"><h2>No saved recipes</h2>
-      <p class="sub">Build some in the Recipe builder, then choose
-        &ldquo;Save to library&rdquo;. Rated recipes sort to the top here.</p></div>`;
+    return `${bookPanel()}
+      <div class="card"><h2>Nothing saved yet</h2>
+      <p class="sub">Open the book above and save what you like, build to your
+        targets in the <b>Recipe builder</b>, or write your own.</p></div>`;
   }
 
   const shown = libShown();
@@ -683,7 +744,8 @@ function viewRecipes() {
   // right there, so wanting rid of just the dear ones, or just the fish, is a
   // filter and a button rather than twenty separate confirmations.
   const filtered = shown.length !== list.length;
-  return `<div class="card">
+  return `${bookPanel()}
+    <div class="card">
     <div class="row" style="align-items:baseline">
       <div style="flex:1;min-width:0">
         <h2 style="margin:0">Recipe library</h2>
@@ -702,6 +764,9 @@ function viewRecipes() {
       <div style="flex:1;min-width:130px">
         <label for="libMeal">Meal</label>
         <select id="libMeal">${optionsFor(MEALS, libView.meal)}</select></div>
+      <div style="flex:1;min-width:130px">
+        <label for="libFrom">Where from</label>
+        <select id="libFrom">${optionsFor(SOURCES, libView.from)}</select></div>
       <div style="flex:1;min-width:130px">
         <label for="libSort">Order</label>
         <select id="libSort">${optionsFor(LIB_SORTS, libView.sort)}</select></div>
@@ -763,6 +828,11 @@ This cannot be undone. Days in `
   const sort = $('libSort');
   if (sort) sort.addEventListener('change', () => {
     libView.sort = sort.value;
+    render();
+  });
+  const from = $('libFrom');
+  if (from) from.addEventListener('change', () => {
+    libView.from = from.value;
     render();
   });
   document.querySelectorAll('[data-libcat]').forEach((b) => {
@@ -1698,6 +1768,7 @@ function viewPrices() {
         <p class="sub" style="margin:4px 0 0">${all.length} foods tracked${
           good ? `, <b>${good}</b> worth buying this week` : ''}.
           The dot on the line is the cheapest reading; the dark dot is now.</p>
+        ${autoPriceLine()}
       </div>
     </div>
     <div class="row" style="margin:14px 0 4px">
@@ -1719,7 +1790,44 @@ function viewPrices() {
     </div>`;
 }
 
+// Both supermarkets change their specials over on a Wednesday, so that is the
+// day the readings are taken. Saying so here answers the obvious question --
+// whether any of this happens without pressing a button.
+function autoPriceLine() {
+  const a = state.autoPrice;
+  if (!a || !a.enabled) {
+    return `<p class="muted small" style="margin:6px 0 0">Prices only change
+      when you press <b>Refresh prices</b> on the shopping list.</p>`;
+  }
+  const when = a.nextRunInHours != null
+    ? (a.nextRunInHours < 24
+        ? `in about ${Math.round(a.nextRunInHours)} hours`
+        : `in about ${Math.round(a.nextRunInHours / 24)} days`)
+    : 'soon';
+  return `<p class="muted small" style="margin:6px 0 0">Checked automatically
+    every ${esc(a.day)} at ${String(a.hour).padStart(2, '0')}:00, when both
+    supermarkets change their specials over &mdash; next ${esc(when)}.
+    <button class="ghost tiny" id="priceNow">Check now</button></p>`;
+}
+
+
 function wirePrices() {
+  const now = $('priceNow');
+  if (now) now.addEventListener('click', async () => {
+    now.disabled = true;
+    now.textContent = 'Checking…';
+    try {
+      const res = await api('/auto-price/run', { method: 'POST' });
+      await loadPlan();
+      toast(res.lines
+        ? `Took ${res.lines} new reading${res.lines === 1 ? '' : 's'}.`
+        : 'Everything was priced recently enough already.');
+    } catch (err) {
+      toast(err.message);
+    }
+    render();
+  });
+
   const find = $('priceFind');
   if (find) {
     find.addEventListener('input', () => {
@@ -4072,6 +4180,7 @@ async function boot() {
   await loadPlan();
   await loadRecipes();
   loadFoodImages();      // deliberately not awaited -- the page is usable now
+  api('/auto-price').then((a) => { state.autoPrice = a; }).catch(() => {});
   try {
     state.cuisines = (await api('/cuisines')).cuisines;
   } catch (_) { state.cuisines = null; }

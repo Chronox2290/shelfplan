@@ -26,7 +26,8 @@ from src.supermarkets import (barcode as barcode_lib,  # noqa: E402
                               catalog, recipe_import, recipes,
                               resolve, stores, weekplan)
 
-from . import auth, mailer, passwords, pricing, security, trickle  # noqa: E402
+from . import (auth, autoprice, mailer, passwords, pricing, security,  # noqa: E402
+               trickle)
 from .db import (Plan, PlanVersion, PriceRecord, Product,  # noqa: E402
                  Recipe, User, get_session, init_db)
 
@@ -72,6 +73,11 @@ def _startup() -> None:
     if trickle.start():
         print(f"Catalogue top-up running: one request every "
               f"~{trickle.INTERVAL_S}s across {', '.join(trickle.STORES)}.",
+              file=sys.stderr)
+    if autoprice.start():
+        where = autoprice.status()
+        print(f"Weekly price check running: {where['day']}s at "
+              f"{where['hour']:02d}:00, from the catalogue only.",
               file=sys.stderr)
     if auth.SECRET_WAS_GENERATED:
         print(
@@ -1811,6 +1817,26 @@ def trickle_status(
 ) -> Dict[str, Any]:
     """Whether the slow background catalogue top-up is running."""
     return trickle.status()
+
+
+@app.get("/api/auto-price")
+def auto_price_status(
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """When the weekly price check last ran, and when it next will."""
+    return autoprice.status()
+
+
+@app.post("/api/auto-price/run")
+def auto_price_now(
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """Run the weekly check now, for everyone, rather than waiting for it.
+
+    Reads the catalogue and makes no outbound request, so there is nothing to
+    rate limit here beyond the work itself.
+    """
+    return autoprice.price_everything()
 
 
 # --------------------------------------------------------------------------
