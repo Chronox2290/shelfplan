@@ -1225,8 +1225,9 @@ def add_shop_item(
         shop[name]["image"] = product.image or ""
         shop[name]["url"] = product.url or ""
 
-    # Seed today's price from the catalogue so the line is costed immediately
-    # rather than showing a blank until the next refresh.
+    # Price it now, not on the next refresh. Adding something and getting a
+    # blank row is what made this feel broken -- "add" should produce a
+    # finished line.
     if product and product.pack_price and pack:
         prices.setdefault(name, []).append({
             "price": product.pack_price,
@@ -1237,6 +1238,38 @@ def add_shop_item(
             "matched": product.name,
             "url": product.url or "",
         })
+        if product.image:
+            shop[name]["image"] = product.image
+    else:
+        # No catalogue product -- typed by hand, or scanned and only known to
+        # the open food database. Look it up once so the line is still costed.
+        try:
+            found = pricing.compare_food(
+                session, name, shop[name]["woo"], target_pack_g=pack)
+            best = None
+            if found.get("cheapest"):
+                best = found["byStore"][found["cheapest"]]
+            else:
+                for candidate in found.get("byStore", {}).values():
+                    if candidate.get("status") == "ok" and candidate.get("price"):
+                        best = candidate
+                        break
+            if best and best.get("price"):
+                prices.setdefault(name, []).append({
+                    "price": best["price"],
+                    "pack": best.get("pack") or pack,
+                    "date": date.today().isoformat(),
+                    "store": best.get("store") or "",
+                    "source": "lookup-on-add",
+                    "matched": best.get("matched_name") or "",
+                    "url": best.get("url") or "",
+                })
+                if not shop[name].get("pack"):
+                    shop[name]["pack"] = best.get("pack")
+                if best.get("image"):
+                    shop[name]["image"] = best["image"]
+        except Exception:  # noqa: BLE001 -- the item is added either way
+            session.rollback()
 
     data["shop"] = shop
     data["prices"] = prices

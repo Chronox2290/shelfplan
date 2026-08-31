@@ -1110,3 +1110,37 @@ cause, and it is instant to rule out.
 searching, prices and the shopping list all keep working from what has already
 been indexed; only a live refresh fails, and it says so rather than showing
 blank cells.
+
+## Matching an ingredient to a product
+
+Two faults, both found by using it:
+
+**"Capsicum, raw" matched "Tomato and Red Capsicum Relish".** A relish is not a
+near miss for a vegetable, it is a different item -- but the words overlap
+almost entirely. Words marking a *prepared form* (relish, chutney, sauce,
+paste, pickled, powder, juice, and so on) now count heavily against a candidate
+unless the request asked for one.
+
+**"Polenta" matched "Instant Polenta" and "Broccoli" matched "Frozen Carrot
+Cauliflower & Broccoli".** The score only measured how many *wanted* words
+appeared, so extra words in the product name cost nothing and pack size then
+decided -- which is how a bag of mixed vegetables wins a search for broccoli.
+Matching is now the harmonic mean of both directions: everything asked for is
+present, **and little else is**. Plain beats instant, and single beats mixed.
+
+```
+Capsicum, raw   ->  Red Capsicum each
+Polenta, dry    ->  La Gina Polenta Corn Meal 500g
+Broccoli, raw   ->  Fresh Broccoli each
+```
+
+## Adding something should finish the job
+
+Scanning a barcode and adding it used to leave a blank row until the next price
+refresh, which read as broken. Items added from the catalogue always carried
+their price; items known only to Open Food Facts -- anything Woolworths does
+not stock -- did not.
+
+Adding now prices the line straight away whichever route it came in by, and a
+line that genuinely has no price says "no price yet" with a **set** button,
+rather than showing a dash and leaving you to guess what to do.

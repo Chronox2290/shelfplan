@@ -893,8 +893,12 @@ function viewShop() {
               p && p.matched ? ' &middot; ' + esc(p.matched) : ''}${link}</div>
             </div></div></td>
           <td class="r num" data-label="Pack">${p && p.pack ? p.pack + ' g' : '&mdash;'}</td>
-          <td class="r num" data-label="Price">${money(p && p.price)}
-            <button class="ghost tiny" data-edit="${esc(food)}" title="Correct this price">edit</button></td>
+          <td class="r num" data-label="Price">${p && p.price
+            ? money(p.price)
+            : '<span class="muted small">no price yet</span>'}
+            <button class="ghost tiny" data-edit="${esc(food)}"
+              title="${p && p.price ? 'Correct this price' : 'Enter a price'}">${
+              p && p.price ? 'edit' : 'set'}</button></td>
           <td class="r num muted" data-label="Per kg">${kg ? money(kg) + '/kg' : '&mdash;'}</td>
           <td class="r muted small" data-label="Store">${esc((p && p.store) || '')}
             <button class="ghost tiny" data-drop="${esc(food)}" title="Remove from list">&times;</button></td>

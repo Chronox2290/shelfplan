@@ -58,6 +58,27 @@ def _tokens(text: str) -> set:
     }
 
 
+# Words that mark a product as a *prepared form* of an ingredient rather than
+# the ingredient. Asking for capsicum and being offered capsicum relish is not
+# a near miss, it is a different item -- but the words overlap almost entirely,
+# so pure token similarity cannot tell them apart and pack-size tie-breaking
+# hands the win to the jar.
+_FORM_WORDS = frozenset("""
+relish chutney sauce paste pickle pickled dip juice powder seasoning
+spice stock soup crisp chip jerky marinade dressing jam spread flavoured
+flavour extract essence syrup cordial pesto salsa hummus dukkah rub
+""".split())
+
+
+def form_penalty(wanted: str, candidate: str) -> float:
+    """Candidate is a prepared form of something the request wanted plain."""
+    want = _tokens(wanted)
+    have = _tokens(candidate)
+    if want & _FORM_WORDS:
+        return 0.0            # a relish was actually asked for
+    return 1.0 if (have & _FORM_WORDS) else 0.0
+
+
 def conflict_penalty(wanted: str, candidate: str) -> float:
     """How strongly the candidate contradicts the wanted food.
 
@@ -75,11 +96,24 @@ def conflict_penalty(wanted: str, candidate: str) -> float:
 
 
 def name_similarity(wanted: str, candidate: str) -> float:
-    """Token overlap of the wanted name against a candidate product name."""
+    """How well a candidate name matches, both ways round.
+
+    Counting only how many wanted words appear (recall) makes "Broccoli" and
+    "Frozen Carrot Cauliflower & Broccoli" score identically, because extra
+    words cost nothing -- and then pack size decides, which is how a bag of
+    mixed vegetables wins a search for broccoli. Words in the candidate that
+    were not asked for have to count against it, so this is the harmonic mean
+    of both directions: everything asked for is present, and little else is.
+    """
     a, b = _tokens(wanted), _tokens(candidate)
     if not a or not b:
         return 0.0
-    return len(a & b) / len(a)
+    overlap = len(a & b)
+    if not overlap:
+        return 0.0
+    recall = overlap / len(a)
+    precision = overlap / len(b)
+    return 2 * recall * precision / (recall + precision)
 
 
 def pack_closeness(target_g: Optional[float], pack_g: Optional[float]) -> float:
@@ -100,8 +134,11 @@ def score(product: Dict[str, Any], wanted: str, target_g: Optional[float]) -> fl
     name = product.get("name", "")
     similarity = name_similarity(wanted, name)
 
-    # A contradicted qualifier sinks the candidate outright.
-    s = 3.0 * similarity - 2.5 * conflict_penalty(wanted, name)
+    # A contradicted qualifier sinks the candidate outright, and so does being
+    # a jar of something when the recipe wanted the vegetable.
+    s = (3.0 * similarity
+         - 2.5 * conflict_penalty(wanted, name)
+         - 3.0 * form_penalty(wanted, name))
 
     # Pack closeness is a tie-breaker, and only once identity is credible.
     if similarity >= 0.5:
@@ -211,6 +248,9 @@ def resolve_from_products(
     similarity = name_similarity(wanted, best.get("name", ""))
     clashes = conflict_penalty(wanted, best.get("name", ""))
     reasons = []
+    if form_penalty(wanted, best.get("name", "")):
+        reasons.append("looks like a prepared version rather than the "
+                       "ingredient itself")
     if clashes:
         reasons.append("contradicts a qualifier in the planned food")
     if similarity < 0.4:
