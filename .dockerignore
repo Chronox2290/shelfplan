@@ -1,0 +1,8 @@
+.git
+.venv
+data
+*.db
+shelf-plan*.html
+__pycache__
+*.pyc
+.env

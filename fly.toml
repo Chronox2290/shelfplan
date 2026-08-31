@@ -1,0 +1,51 @@
+# Fly.io deployment. First run:
+#
+#   fly launch --no-deploy --copy-config --name YOUR-APP
+#   fly volumes create shelfplan_data --size 1 --region syd
+#   fly secrets set SESSION_SECRET="$(openssl rand -base64 48)" \
+#                   SIGNUP_INVITE_CODE="$(openssl rand -hex 8)"
+#   fly secrets set PUBLIC_URL="https://YOUR-APP.fly.dev"
+#   fly deploy
+#
+# Region syd keeps the supermarket lookups inside Australia.
+
+app = "shelfplan"
+primary_region = "syd"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Fly terminates TLS, so the app must know it is public and cookies secure.
+  COOKIE_SECURE = "1"
+  SIGNUP_MODE = "invite"
+  DATABASE_URL = "sqlite:////data/shelfplan.db"
+
+[[mounts]]
+  source = "shelfplan_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # Keep one machine warm: a cold start loses the in-process Coles cache and
+  # the rate-limit counters.
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 40
+    hard_limit = 80
+
+[[http_service.checks]]
+  grace_period = "15s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

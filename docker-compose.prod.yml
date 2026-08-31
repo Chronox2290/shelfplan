@@ -1,0 +1,46 @@
+# Public deployment on your own server, with automatic HTTPS.
+#
+#   cp .env.example .env      # then fill DOMAIN, EMAIL, SESSION_SECRET, invite
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Only Caddy is exposed; the app itself is reachable only on the internal
+# network, so nothing can reach it over plain http from outside.
+
+services:
+  shelfplan:
+    build: .
+    image: shelfplan:latest
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      SESSION_SECRET: "${SESSION_SECRET:?set SESSION_SECRET in .env}"
+      PUBLIC_URL: "https://${DOMAIN:?set DOMAIN in .env}"
+      COOKIE_SECURE: "1"
+      SIGNUP_MODE: "${SIGNUP_MODE:-invite}"
+      SIGNUP_INVITE_CODE: "${SIGNUP_INVITE_CODE:-}"
+      DATABASE_URL: "${DATABASE_URL:-sqlite:////app/data/shelfplan.db}"
+    volumes:
+      - shelfplan-data:/app/data
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: "${DOMAIN:?set DOMAIN in .env}"
+      EMAIL: "${EMAIL:-}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - shelfplan
+
+volumes:
+  shelfplan-data:
+  caddy-data:
+  caddy-config:

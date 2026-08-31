@@ -1,0 +1,42 @@
+services:
+  shelfplan:
+    build:
+      context: .
+      args:
+        APP_VERSION: "${APP_VERSION:-dev}"
+    image: shelfplan:latest
+    container_name: shelfplan
+    restart: unless-stopped
+    ports:
+      - "${SHELFPLAN_PORT:-8000}:8000"
+    environment:
+      # Required. Generate once with:  openssl rand -base64 48
+      SESSION_SECRET: "${SESSION_SECRET:?set SESSION_SECRET in .env before starting}"
+      # Plain http on localhost needs this off; set to 1 behind TLS.
+      COOKIE_SECURE: "${COOKIE_SECURE:-0}"
+      DATABASE_URL: "${DATABASE_URL:-sqlite:////app/data/shelfplan.db}"
+      COLES_API_KEY: "${COLES_API_KEY:-}"
+      # open | invite | closed. Local-only default is open; the production
+      # compose defaults to invite because that one faces the internet.
+      SIGNUP_MODE: "${SIGNUP_MODE:-open}"
+      SIGNUP_INVITE_CODE: "${SIGNUP_INVITE_CODE:-}"
+      # Used to build password-reset links. Without SMTP the link is written
+      # to the container log instead.
+      PUBLIC_URL: "${PUBLIC_URL:-}"
+      # Slowly tops up the product catalogue in the background: one request
+      # every couple of minutes, which never looks like a crawl. Off unless
+      # you set TRICKLE=1.
+      APP_VERSION: "${APP_VERSION:-dev}"
+      TRICKLE: "${TRICKLE:-0}"
+      TRICKLE_INTERVAL_SECONDS: "${TRICKLE_INTERVAL_SECONDS:-120}"
+      TRICKLE_STORES: "${TRICKLE_STORES:-coles,woolworths}"
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+    volumes:
+      - shelfplan-data:/app/data
+
+volumes:
+  shelfplan-data:

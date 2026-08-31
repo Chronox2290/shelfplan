@@ -1,0 +1,19 @@
+# Automatic HTTPS for a VPS deploy. Caddy fetches and renews a Let's Encrypt
+# certificate on its own; point your domain's A record at the server first.
+#
+# Set DOMAIN and EMAIL in .env, then: docker compose -f docker-compose.prod.yml up -d
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# The app sets its own security headers; Caddy adds the transport-level one.
+	header {
+		Strict-Transport-Security "max-age=15552000; includeSubDomains"
+		-Server
+	}
+
+	reverse_proxy shelfplan:8000 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-For {remote_host}
+	}
+}

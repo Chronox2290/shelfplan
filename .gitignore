@@ -10,3 +10,24 @@ wheels/
 .venv
 
 .env
+# Runtime data. The database holds accounts and Argon2 password hashes, so it
+# must never reach a repository -- public or private.
+data/
+backups/
+*.db
+*.sqlite
+*.sqlite3
+
+# Local state
+.launcher-seen
+coles_key.txt
+
+# Personal meal plans exported from the app. These are the user's own data,
+# not part of the project.
+shelf-plan*.html
+*-plan-updated.html
+
+# Scratch output from development probes
+catalog_probe.json
+resolve_probe.json
+resolve2.json

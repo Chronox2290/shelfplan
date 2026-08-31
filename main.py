@@ -1,7 +1,10 @@
 import asyncio
+import json
+
 from mcp.server.fastmcp import FastMCP
 
 # Import from supermarkets package
+from src.supermarkets import catalog, resolve
 from src.supermarkets import (
     coles_search_products,
     coles_extract_products,
@@ -90,6 +93,52 @@ async def get_woolworths_products(query: str, limit: int = 10) -> str:
         return "\n---\n".join(formatted_products)
     except Exception as e:
         return f"An unexpected error occurred in get_woolworths_products: {str(e)}"
+
+
+@mcp.tool()
+async def search_woolworths(query: str, limit: int = 10) -> str:
+    """Search Woolworths and return structured JSON, including pack size in
+    grams and the price per kilogram.
+
+    Prefer this over get_woolworths_products for anything that does arithmetic:
+    it keeps the pack magnitude and derives the pack price from the store's own
+    per-unit price, so variable-weight lines (priced per kg but sold as a
+    ~350g fillet) are costed correctly.
+
+    Args:
+        query: The product search query.
+        limit: Maximum number of products to return.
+    """
+    result = await asyncio.to_thread(catalog.search, query=query, limit=limit)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def price_planned_food(
+    food: str,
+    query: str = "",
+    pack_grams: float = 0,
+) -> str:
+    """Price one planned food on the meal plan's own basis.
+
+    Chooses the listing whose pack is closest to the one the plan buys, and
+    keeps a drained weight drained, so the returned price/pack pair stays
+    comparable with what the plan already recorded. The result carries a
+    confidence score and a needs_review flag -- do not overwrite a hand-checked
+    figure when needs_review is set.
+
+    Args:
+        food: The planned food name, e.g. "Woolworths Chickpeas, drained".
+        query: Store search term. Defaults to the food name.
+        pack_grams: The pack size the plan buys, in grams. 0 if unknown.
+    """
+    result = await asyncio.to_thread(
+        resolve.resolve_food,
+        food=food,
+        query=query or food,
+        target_pack_g=pack_grams or None,
+    )
+    return json.dumps(result, indent=2)
 
 
 if __name__ == "__main__":

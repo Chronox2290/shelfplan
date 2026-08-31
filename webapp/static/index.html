@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f6f7f3" media="(prefers-color-scheme:light)">
+<meta name="theme-color" content="#11150f" media="(prefers-color-scheme:dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Shelf Plan">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<link rel="icon" href="/static/icons/icon-192.png">
+<title>Shelf Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#f6f7f3; --panel:#fff; --sunk:#eef0ea; --field:#fff;
+  --ink:#161c17; --ink-2:#4d564e; --ink-3:#7b857c;
+  --rule:#d6dad1; --hair:#e7eae2;
+  --accent:#2f6b4f; --accent-soft:#e3ede6; --accent-ink:#fff;
+  --warn:#8a6410; --warn-soft:#f6eed9;
+  --stop:#9c3a2c; --stop-soft:#f7e4e0;
+  --shadow:0 1px 2px rgba(22,28,23,.06);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#11150f; --panel:#181d17; --sunk:#1f251e; --field:#10140f;
+    --ink:#e8ece4; --ink-2:#a7b1a5; --ink-3:#7d877c;
+    --rule:#2c332a; --hair:#242a23;
+    --accent:#7cc49b; --accent-soft:#1d2b23; --accent-ink:#0d130f;
+    --warn:#d8ac52; --warn-soft:#2b2416;
+    --stop:#e08573; --stop-soft:#2e1c18;
+    --shadow:none;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);
+  font-family:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:16px;line-height:1.5}
+h1,h2,h3{font-family:Archivo,Helvetica,Arial,sans-serif;margin:0;text-wrap:balance}
+.num{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+.wrap{max-width:1040px;margin:0 auto;padding:0 18px 80px}
+a{color:var(--accent)}
+
+/* header */
+header.top{border-bottom:1px solid var(--rule);background:var(--panel);position:sticky;top:0;z-index:20}
+.top-in{max-width:1040px;margin:0 auto;padding:12px 18px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.brand{font-family:Archivo;font-weight:700;font-size:19px;letter-spacing:-.01em}
+.brand span{color:var(--accent)}
+.spacer{flex:1}
+.who{color:var(--ink-3);font-size:13px}
+
+/* controls */
+button,.btn{font:inherit;font-weight:600;border-radius:8px;border:1px solid var(--rule);
+  background:var(--panel);color:var(--ink);padding:8px 14px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.primary:hover{filter:brightness(1.08)}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.ghost{background:transparent;border-color:transparent;color:var(--ink-2);padding:6px 10px}
+input,select,textarea{font:inherit;background:var(--field);color:var(--ink);
+  border:1px solid var(--rule);border-radius:8px;padding:9px 11px;width:100%}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin:0 0 5px}
+
+/* nav */
+nav.tabs{display:flex;gap:2px;border-bottom:1px solid var(--rule);margin:22px 0 20px;overflow-x:auto}
+nav.tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;
+  padding:9px 14px;color:var(--ink-3);white-space:nowrap}
+nav.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+
+/* panels */
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:12px;
+  padding:18px;box-shadow:var(--shadow);margin:0 0 16px}
+.card h2{font-size:17px;margin:0 0 3px}
+.card .sub{color:var(--ink-3);font-size:13.5px;margin:0 0 14px}
+.grid{display:grid;gap:14px}
+@media(min-width:760px){.g2{grid-template-columns:1fr 1fr}}
+
+/* table */
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--ink-3);font-weight:600;padding:0 10px 8px;border-bottom:1px solid var(--rule)}
+td{padding:9px 10px;border-bottom:1px solid var(--hair);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.r,th.r{text-align:right}
+.scroll{overflow-x:auto}
+
+/* bits */
+.tag{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 7px;border-radius:999px;
+  background:var(--sunk);color:var(--ink-2)}
+.tag.ok{background:var(--accent-soft);color:var(--accent)}
+.tag.warn{background:var(--warn-soft);color:var(--warn)}
+.tag.stop{background:var(--stop-soft);color:var(--stop)}
+.up{color:var(--stop);font-weight:600}
+.down{color:var(--accent);font-weight:600}
+.muted{color:var(--ink-3)}
+.note{background:var(--sunk);border-radius:8px;padding:11px 13px;font-size:14px;color:var(--ink-2)}
+.err{background:var(--stop-soft);color:var(--stop);border-radius:8px;padding:11px 13px;font-size:14px;margin:0 0 12px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.stat{background:var(--sunk);border-radius:10px;padding:12px 14px}
+.stat .k{font-size:12px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em}
+.stat .v{font-family:"IBM Plex Mono",monospace;font-size:21px;font-weight:600}
+.stats{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin:0 0 16px}
+.hide{display:none!important}
+.center{max-width:400px;margin:60px auto}
+.day{border:1px solid var(--rule);border-radius:10px;padding:14px;background:var(--panel)}
+.day h3{font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin:0 0 9px}
+.meal{padding:6px 0;border-bottom:1px solid var(--hair);font-size:14.5px}
+.meal:last-child{border-bottom:0}
+.aisle{font-family:Archivo;font-weight:600;font-size:13px;text-transform:uppercase;
+  letter-spacing:.05em;color:var(--accent);padding:16px 10px 6px}
+
+/* phones: safe areas, bigger touch targets, no accidental zoom on focus */
+.top-in,.wrap{padding-left:max(18px,env(safe-area-inset-left));
+  padding-right:max(18px,env(safe-area-inset-right))}
+body{padding-bottom:env(safe-area-inset-bottom)}
+@media (max-width:560px){
+  .wrap{padding-bottom:40px}
+  button,.btn{padding:11px 16px;min-height:44px}
+  nav.tabs button{padding:11px 13px;min-height:44px}
+  /* iOS zooms the page when focusing a field under 16px */
+  input,select,textarea{font-size:16px}
+  .card{padding:14px;border-radius:10px}
+  table{font-size:13.5px}
+  td,th{padding:8px 7px}
+  .stat .v{font-size:18px}
+  .brand{font-size:17px}
+}
+@media (display-mode:standalone){
+  header.top{padding-top:env(safe-area-inset-top)}
+}
+#installBtn{display:none}
+
+/* recipe cards */
+.recipe h4{font-family:Archivo;font-size:12px;text-transform:uppercase;
+  letter-spacing:.05em;color:var(--ink-3);margin:14px 0 6px}
+.macros{display:flex;flex-wrap:wrap;gap:10px;font-size:13px;color:var(--ink-2);
+  background:var(--sunk);border-radius:8px;padding:8px 10px;margin:0 0 10px}
+.macros b{color:var(--ink)}
+ol.steps,ul.steps{margin:0;padding-left:20px;font-size:14px;color:var(--ink-2)}
+ol.steps li,ul.steps li{margin:0 0 5px}
+.small{font-size:12.5px}
+button.tiny{padding:3px 9px;font-size:12.5px;min-height:0}
+button.danger{color:var(--stop)}
+button.danger:hover{border-color:var(--stop)}
+
+/* rating */
+.rating{display:flex;align-items:center;gap:1px}
+button.star{background:none;border:0;padding:1px 2px;font-size:19px;line-height:1;
+  color:var(--rule);cursor:pointer;min-height:0}
+button.star:hover{color:var(--warn)}
+button.star.on{color:var(--warn)}
+
+/* shopping list ticks */
+label.tick{display:flex;align-items:center;gap:8px;cursor:pointer}
+label.tick input{width:18px;height:18px;accent-color:var(--accent);flex:none}
+tr.got td{opacity:.5}
+tr.got label.tick span{text-decoration:line-through}
+
+/* sparkline */
+.spark{display:block}
+.spark-cell{width:230px}
+.option{border-color:var(--rule)}
+.option:hover{border-color:var(--accent)}
+.opt-letter{display:flex;align-items:center;justify-content:center;
+  width:24px;height:24px;border-radius:6px;background:var(--accent);
+  color:var(--accent-ink);font-family:"IBM Plex Mono",monospace;
+  font-weight:600;font-size:13px;flex:none}
+
+/* calendar */
+.calendar{display:grid;gap:12px;grid-template-columns:1fr}
+@media(min-width:680px){.calendar{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1000px){.calendar{grid-template-columns:repeat(4,1fr)}}
+.calendar .day h3{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.calendar .day.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+button.add-day{width:100%;margin-top:8px;border-style:dashed;color:var(--ink-3)}
+button.add-day:hover{color:var(--accent);border-color:var(--accent)}
+
+/* category dots */
+.dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block;
+  background:var(--ink-3)}
+.dot.cat-chicken{background:#c8922f}
+.dot.cat-beef{background:#9c3a2c}
+.dot.cat-pork{background:#c2748c}
+.dot.cat-lamb{background:#7d5a3c}
+.dot.cat-fish{background:#3f7fa6}
+.dot.cat-vegetarian{background:#2f6b4f}
+.dot.cat-other{background:var(--ink-3)}
+
+/* cook counter */
+.counter{display:inline-flex;align-items:center;gap:6px;background:var(--sunk);
+  border-radius:999px;padding:2px 4px;font-size:12.5px;color:var(--ink-2)}
+.counter button{padding:0 7px;min-height:0;line-height:1.5}
+.counter button:disabled{opacity:.35}
+
+/* picker sheet */
+.sheet-back{position:fixed;inset:0;background:rgba(19,23,20,.45);z-index:40}
+.sheet{position:fixed;z-index:41;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(620px,94vw);max-height:86vh;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--rule);border-radius:14px;
+  padding:18px;box-shadow:0 24px 60px -20px rgba(0,0,0,.5)}
+.sheet-top{display:flex;justify-content:space-between;align-items:flex-start;
+  gap:12px;margin:0 0 12px}
+.sheet-body{overflow-y:auto;min-height:0}
+h4.pick-head{font-family:Archivo;font-size:11.5px;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--ink-3);margin:14px 0 6px;font-weight:600}
+h4.pick-head:first-child{margin-top:0}
+.pick-list{display:grid;gap:6px}
+button.pick{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:9px 11px;background:var(--panel);border:1px solid var(--hair);
+  font-weight:400}
+button.pick:hover{border-color:var(--accent);background:var(--accent-soft)}
+.pick-body{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
+.pick-body b{font-weight:600}
+.pick-meta{display:flex;gap:4px;flex:none}
+@media(max-width:560px){.sheet{width:96vw;max-height:90vh;padding:14px}}
+
+.thumb{width:46px;height:46px;border-radius:8px;object-fit:contain;flex:none;
+  background:#fff;border:1px solid var(--hair)}
+.thumb.none{display:flex;align-items:center;justify-content:center;
+  background:var(--sunk);color:var(--ink-3);font-family:Archivo,sans-serif;
+  font-weight:600;font-size:17px}
+.prod-row{display:flex;gap:11px;align-items:flex-start}
+.prod-row>div{min-width:0}
+td.prod{min-width:250px}
+@media (max-width:560px){.option{border-color:var(--rule)}
+.option:hover{border-color:var(--accent)}
+.opt-letter{display:flex;align-items:center;justify-content:center;
+  width:24px;height:24px;border-radius:6px;background:var(--accent);
+  color:var(--accent-ink);font-family:"IBM Plex Mono",monospace;
+  font-weight:600;font-size:13px;flex:none}
+
+/* calendar */
+.calendar{display:grid;gap:12px;grid-template-columns:1fr}
+@media(min-width:680px){.calendar{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1000px){.calendar{grid-template-columns:repeat(4,1fr)}}
+.calendar .day h3{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.calendar .day.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+button.add-day{width:100%;margin-top:8px;border-style:dashed;color:var(--ink-3)}
+button.add-day:hover{color:var(--accent);border-color:var(--accent)}
+
+/* category dots */
+.dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block;
+  background:var(--ink-3)}
+.dot.cat-chicken{background:#c8922f}
+.dot.cat-beef{background:#9c3a2c}
+.dot.cat-pork{background:#c2748c}
+.dot.cat-lamb{background:#7d5a3c}
+.dot.cat-fish{background:#3f7fa6}
+.dot.cat-vegetarian{background:#2f6b4f}
+.dot.cat-other{background:var(--ink-3)}
+
+/* cook counter */
+.counter{display:inline-flex;align-items:center;gap:6px;background:var(--sunk);
+  border-radius:999px;padding:2px 4px;font-size:12.5px;color:var(--ink-2)}
+.counter button{padding:0 7px;min-height:0;line-height:1.5}
+.counter button:disabled{opacity:.35}
+
+/* picker sheet */
+.sheet-back{position:fixed;inset:0;background:rgba(19,23,20,.45);z-index:40}
+.sheet{position:fixed;z-index:41;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(620px,94vw);max-height:86vh;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--rule);border-radius:14px;
+  padding:18px;box-shadow:0 24px 60px -20px rgba(0,0,0,.5)}
+.sheet-top{display:flex;justify-content:space-between;align-items:flex-start;
+  gap:12px;margin:0 0 12px}
+.sheet-body{overflow-y:auto;min-height:0}
+h4.pick-head{font-family:Archivo;font-size:11.5px;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--ink-3);margin:14px 0 6px;font-weight:600}
+h4.pick-head:first-child{margin-top:0}
+.pick-list{display:grid;gap:6px}
+button.pick{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:9px 11px;background:var(--panel);border:1px solid var(--hair);
+  font-weight:400}
+button.pick:hover{border-color:var(--accent);background:var(--accent-soft)}
+.pick-body{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
+.pick-body b{font-weight:600}
+.pick-meta{display:flex;gap:4px;flex:none}
+@media(max-width:560px){.sheet{width:96vw;max-height:90vh;padding:14px}}
+
+.thumb{width:38px;height:38px}}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:var(--panel);color:var(--ink-3);
+  padding:8px 14px;font-size:14px}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+.seg button+button{border-left:1px solid var(--rule)}
+button.tiny.done{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.dropzone{border:2px dashed var(--rule);border-radius:12px;padding:22px 16px;
+  text-align:center;background:var(--sunk);transition:border-color .12s}
+.dropzone.over{border-color:var(--accent);background:var(--accent-soft)}
+.dropzone p{margin:0 0 8px}
+.dropzone input[type=file]{width:auto;background:none;border:0;padding:0}
+details summary{cursor:pointer}
+@media (max-width:560px){.spark-cell{display:none}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-in">
+    <div class="brand">Shelf<span>Plan</span></div>
+    <div class="spacer"></div>
+    <div id="planPicker" class="row hide">
+      <select id="planSelect" style="width:auto;min-width:180px"></select>
+      <button id="newPlan" class="ghost">New</button>
+    </div>
+    <div id="userBox" class="row hide">
+      <span class="who" id="whoami"></span>
+      <button id="installBtn" class="ghost">Install</button>
+      <button id="signOut" class="ghost">Sign out</button>
+    </div>
+  </div>
+</header>
+
+<!-- Sign in -->
+<section id="authView" class="wrap hide">
+  <div class="card center">
+    <h2 id="authTitle">Sign in</h2>
+    <p class="sub" id="authSub">Your plan and price history sync to your account.</p>
+    <div id="authErr" class="err hide"></div>
+    <div class="grid">
+      <div><label for="email">Email</label><input id="email" type="email" autocomplete="email"></div>
+      <div><label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password"></div>
+      <div id="inviteRow" class="hide"><label for="invite">Invite code</label>
+        <input id="invite" autocomplete="off"
+               placeholder="Ask whoever shared this link"></div>
+      <button id="authGo" class="primary">Sign in</button>
+      <p class="muted" style="font-size:14px;margin:0">
+        <span id="authSwitchText">No account yet?</span>
+        <a href="#" id="authSwitch">Create one</a>
+        <span id="forgotWrap"> &middot; <a href="#" id="forgotLink">Forgot password?</a></span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- Choose a new password (reached from a reset link) -->
+<section id="resetView" class="wrap hide">
+  <div class="card center">
+    <h2>Choose a new password</h2>
+    <p class="sub">The link works once. Setting a password signs out every other
+      device.</p>
+    <div id="resetErr" class="err hide"></div>
+    <div class="grid">
+      <div><label for="newPassword">New password</label>
+        <input id="newPassword" type="password" autocomplete="new-password"></div>
+      <div><label for="newPassword2">Repeat it</label>
+        <input id="newPassword2" type="password" autocomplete="new-password"></div>
+      <button id="resetGo" class="primary">Set password and sign in</button>
+      <p class="muted" style="font-size:14px;margin:0">
+        <a href="/" id="resetCancel">Back to sign in</a></p>
+    </div>
+  </div>
+</section>
+
+<!-- App -->
+<main id="appView" class="wrap hide">
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="week" aria-selected="true">Week</button>
+    <button role="tab" data-tab="build" aria-selected="false">Recipe builder</button>
+    <button role="tab" data-tab="shop" aria-selected="false">Shopping list</button>
+    <button role="tab" data-tab="prices" aria-selected="false">Prices</button>
+    <button role="tab" data-tab="search" aria-selected="false">Find food</button>
+    <button role="tab" data-tab="findrec" aria-selected="false">Find a recipe</button>
+    <button role="tab" data-tab="recipes" aria-selected="false">Recipes</button>
+    <button role="tab" data-tab="data" aria-selected="false">Data</button>
+  </nav>
+  <div id="panels"></div>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

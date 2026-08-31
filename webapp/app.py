@@ -1,0 +1,1131 @@
+"""Shelf Plan -- meal plan, price check and shopping list, with accounts.
+
+Run locally:   uv run uvicorn webapp.app:app --port 8000
+Run in Docker: docker compose up
+"""
+
+from datetime import date, datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+import os
+import sys
+
+from fastapi import (
+    Depends, FastAPI, HTTPException, Query, Request, Response, status,
+)
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.supermarkets import (catalog, recipe_import,  # noqa: E402
+                              recipes, resolve, stores)
+
+from . import auth, mailer, passwords, pricing, security, trickle  # noqa: E402
+from .db import (Plan, PriceRecord, Product, Recipe, User,  # noqa: E402
+                 get_session, init_db)
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+# Stamped at image build time; falls back to the source mtime when running
+# straight from a checkout.
+APP_VERSION = os.getenv("APP_VERSION", "").strip() or "dev"
+try:
+    BUILD_STAMP = datetime.fromtimestamp(
+        Path(__file__).stat().st_mtime, tz=timezone.utc).isoformat(timespec="seconds")
+except Exception:  # noqa: BLE001
+    BUILD_STAMP = ""
+
+# Set to the public https origin once deployed, e.g. https://shelfplan.fly.dev
+PUBLIC_URL = os.getenv("PUBLIC_URL", "").strip().rstrip("/")
+PUBLIC = bool(PUBLIC_URL)
+
+app = FastAPI(title="Shelf Plan", version="1.0")
+
+
+@app.middleware("http")
+async def _harden(request: Request, call_next):
+    """Attach security headers, and refuse plain http once public.
+
+    The scheme comes from request.url after uvicorn has applied
+    --proxy-headers, so behind Fly or Caddy this reflects what the browser
+    actually used rather than the plaintext hop inside the network.
+    """
+    if PUBLIC and request.url.scheme == "http" and request.url.hostname not in (
+            "localhost", "127.0.0.1"):
+        return RedirectResponse(
+            str(request.url.replace(scheme="https")), status_code=308)
+    response = await call_next(request)
+    for key, value in security.security_headers(https_only=PUBLIC).items():
+        response.headers.setdefault(key, value)
+    return response
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    init_db()
+    if trickle.start():
+        print(f"Catalogue top-up running: one request every "
+              f"~{trickle.INTERVAL_S}s across {', '.join(trickle.STORES)}.",
+              file=sys.stderr)
+    if auth.SECRET_WAS_GENERATED:
+        print(
+            "WARNING: SESSION_SECRET is unset, so a random one was generated. "
+            "Everyone will be signed out on restart. Set SESSION_SECRET to fix.",
+            file=sys.stderr,
+        )
+    problem = security.signup_config_error()
+    if problem:
+        print(f"WARNING: {problem}", file=sys.stderr)
+    if PUBLIC and not auth.COOKIE_SECURE:
+        print(
+            "WARNING: PUBLIC_URL is set but COOKIE_SECURE is off, so session "
+            "cookies would travel in clear. Set COOKIE_SECURE=1.",
+            file=sys.stderr,
+        )
+    if PUBLIC and security.SIGNUP_MODE == "open":
+        print(
+            "NOTE: signup is open -- anyone with the URL can create an "
+            "account. Set SIGNUP_MODE=invite to restrict it.",
+            file=sys.stderr,
+        )
+
+
+# --------------------------------------------------------------------------
+# Schemas
+# --------------------------------------------------------------------------
+
+class Credentials(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=1024)
+    invite: Optional[str] = Field(default=None, max_length=200)
+
+
+class ForgotRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=512)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=1, max_length=1024)
+
+
+class RecipeIn(BaseModel):
+    name: str = Field(min_length=1, max_length=300)
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RecipePatch(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=300)
+    rating: Optional[int] = Field(default=None, ge=1, le=5)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    clear_rating: bool = False
+    # +1 for "cooked it", -1 to undo a mis-click. An absolute value can also be
+    # set directly, which is what the counter's own control uses.
+    cooked: int = Field(default=0, ge=-1, le=1)
+    times_cooked: Optional[int] = Field(default=None, ge=0, le=9999)
+
+
+class SaveRecipesRequest(BaseModel):
+    recipes: List[Dict[str, Any]]
+
+
+class ShopItemIn(BaseModel):
+    """Add a product to the shopping list."""
+    food: Optional[str] = Field(default=None, max_length=300)
+    query: Optional[str] = Field(default=None, max_length=300)
+    store: Optional[str] = Field(default=None, max_length=32)
+    stockcode: Optional[str] = Field(default=None, max_length=40)
+    aisle: str = Field(default="other", max_length=40)
+    pack: Optional[float] = Field(default=None, gt=0, le=100_000)
+    grams: Optional[float] = Field(default=None, gt=0, le=1_000_000)
+
+
+class ImportRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    servings: Optional[int] = Field(default=None, ge=1, le=50)
+    system: str = Field(default="metric", max_length=10)
+
+
+class RescaleRequest(BaseModel):
+    recipe: Dict[str, Any]
+    servings: Optional[int] = Field(default=None, ge=1, le=50)
+    system: str = Field(default="metric", max_length=10)
+
+
+class ManualPrice(BaseModel):
+    food: str = Field(min_length=1, max_length=300)
+    price: float = Field(gt=0, le=10_000)
+    pack: Optional[float] = Field(default=None, gt=0, le=100_000)
+    store: str = Field(default="manual entry", max_length=120)
+
+
+class PlanIn(BaseModel):
+    name: str = Field(default="My plan", max_length=200)
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PlanPatch(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=200)
+    data: Optional[Dict[str, Any]] = None
+
+
+class RefreshRequest(BaseModel):
+    store: str = Field(default="Woolworths (online)", max_length=120)
+    apply_reviewed: bool = Field(
+        default=False,
+        description="Also apply matches the resolver flagged for review.",
+    )
+    stores: List[str] = Field(
+        default_factory=lambda: list(stores.ALL_STORES),
+        description="Which supermarkets to price against.",
+    )
+
+
+class GenerateRequest(BaseModel):
+    seed: str = Field(default="week", max_length=120)
+    meals: int = Field(default=5, ge=1, le=14)
+    servings: int = Field(default=4, ge=1, le=20)
+    kcal_per_serving: float = Field(default=600, ge=150, le=2000)
+    protein_per_serving: float = Field(default=40, ge=5, le=200)
+    diet: str = Field(default="any", max_length=20)
+    cuisine: str = Field(default="any", max_length=32)
+    exclude: List[str] = Field(default_factory=list)
+    price: bool = Field(default=True, description="Cost it from live prices.")
+    stores: List[str] = Field(default_factory=lambda: list(stores.ALL_STORES))
+
+
+# --------------------------------------------------------------------------
+# Auth
+# --------------------------------------------------------------------------
+
+@app.get("/api/auth/config")
+def auth_config() -> Dict[str, Any]:
+    """What the sign-in screen needs to know before anyone types anything."""
+    return {
+        "signupMode": security.SIGNUP_MODE,
+        "inviteRequired": security.SIGNUP_MODE == "invite",
+        "minPasswordLength": auth.MIN_PASSWORD_LENGTH,
+    }
+
+
+@app.post("/api/auth/register")
+def register(
+    body: Credentials,
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    security.enforce(security.register_by_ip, security.client_ip(request),
+                     "sign-up attempts from this address")
+    security.check_signup_allowed(body.invite)
+    user = auth.register_user(session, body.email, body.password)
+    auth.set_session(response, user.id, user.session_version or 1)
+    return {"id": user.id, "email": user.email}
+
+
+@app.post("/api/auth/login")
+def login(
+    body: Credentials,
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    ip = security.client_ip(request)
+    account = body.email.strip().lower()
+    # Both limits are checked before the password is verified, so a flood never
+    # reaches the deliberately-expensive Argon2 hash.
+    security.enforce(security.login_by_ip, ip,
+                     "sign-in attempts from this address")
+    security.enforce(security.login_by_account, account,
+                     "sign-in attempts for this account")
+    user = auth.authenticate(session, account, body.password)
+    # A correct password clears the counters, so ordinary typos never
+    # accumulate into a lockout for the real owner.
+    security.login_by_ip.reset(ip)
+    security.login_by_account.reset(account)
+    auth.set_session(response, user.id, user.session_version or 1)
+    return {"id": user.id, "email": user.email}
+
+
+def _reset_link(request: Request, token: str) -> str:
+    """Absolute URL for a reset token.
+
+    PUBLIC_URL wins when set, because behind a proxy the request's own host
+    may be the internal one. Falls back to what the request saw.
+    """
+    base = os.getenv("PUBLIC_URL", "").strip().rstrip("/")
+    if not base:
+        base = str(request.base_url).rstrip("/")
+    return f"{base}/?reset={token}"
+
+
+@app.post("/api/auth/forgot")
+def forgot_password(
+    body: ForgotRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Start a password reset.
+
+    Always answers the same way. Confirming which addresses have accounts
+    would turn this endpoint into a membership oracle.
+    """
+    ip = security.client_ip(request)
+    security.enforce(security.forgot_by_ip, ip,
+                     "password reset requests from this address")
+    security.enforce(security.forgot_by_account, body.email.strip().lower(),
+                     "password reset requests for this account")
+
+    issued = passwords.issue(session, body.email, ip=ip)
+    if issued is not None:
+        user, token = issued
+        subject, text = mailer.reset_email(
+            _reset_link(request, token), passwords.TOKEN_TTL_MINUTES)
+        mailer.send(user.email, subject, text)
+
+    return {
+        "ok": True,
+        "message": ("If that address has an account, a reset link is on its "
+                    "way. The link expires in "
+                    f"{passwords.TOKEN_TTL_MINUTES} minutes."),
+        "mailConfigured": mailer.configured(),
+    }
+
+
+@app.post("/api/auth/reset")
+def reset_password(
+    body: ResetRequest,
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Redeem a reset token and sign the user in on the new password."""
+    security.enforce(security.reset_by_ip, security.client_ip(request),
+                     "reset attempts from this address")
+    auth.validate_password(body.password)
+    try:
+        user = passwords.redeem(session, body.token, body.password,
+                                auth.hash_password)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+    # Every previous session is now invalid, including any the attacker held.
+    auth.set_session(response, user.id, user.session_version)
+    return {"id": user.id, "email": user.email}
+
+
+@app.post("/api/auth/change-password")
+def change_password(
+    body: ChangePasswordRequest,
+    response: Response,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Change the password of a signed-in user, ending other sessions."""
+    if not auth.verify_password(user.password_hash, body.current_password):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED,
+                            "That is not your current password.")
+    auth.validate_password(body.new_password)
+    passwords.change_password(session, user, body.new_password,
+                              auth.hash_password)
+    auth.set_session(response, user.id, user.session_version)
+    return {"ok": True, "message": "Password changed. Other sessions signed out."}
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response) -> Dict[str, bool]:
+    auth.clear_session(response)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def me(user: Optional[User] = Depends(auth.optional_user)) -> Dict[str, Any]:
+    if user is None:
+        return {"signedIn": False}
+    return {"signedIn": True, "id": user.id, "email": user.email}
+
+
+# --------------------------------------------------------------------------
+# Plans
+# --------------------------------------------------------------------------
+
+def _plan_summary(plan: Plan) -> Dict[str, Any]:
+    return {
+        "id": plan.id,
+        "name": plan.name,
+        "updatedAt": plan.updated_at.isoformat() if plan.updated_at else None,
+    }
+
+
+def _owned_plan(session: Session, user: User, plan_id: int) -> Plan:
+    plan = session.get(Plan, plan_id)
+    # Same 404 whether it is missing or someone else's, so plan ids cannot be
+    # probed for existence.
+    if plan is None or plan.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plan not found.")
+    return plan
+
+
+@app.get("/api/plans")
+def list_plans(
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    plans = session.scalars(
+        select(Plan).where(Plan.user_id == user.id).order_by(Plan.updated_at.desc())
+    ).all()
+    return {"plans": [_plan_summary(p) for p in plans]}
+
+
+@app.post("/api/plans", status_code=status.HTTP_201_CREATED)
+def create_plan(
+    body: PlanIn,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    plan = Plan(user_id=user.id, name=body.name, data=body.data)
+    session.add(plan)
+    session.commit()
+    return {**_plan_summary(plan), "data": plan.data}
+
+
+@app.get("/api/plans/{plan_id}")
+def read_plan(
+    plan_id: int,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    plan = _owned_plan(session, user, plan_id)
+    return {**_plan_summary(plan), "data": plan.data}
+
+
+@app.put("/api/plans/{plan_id}")
+def update_plan(
+    plan_id: int,
+    body: PlanPatch,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    plan = _owned_plan(session, user, plan_id)
+    if body.name is not None:
+        plan.name = body.name
+    if body.data is not None:
+        plan.data = body.data
+    session.commit()
+    return {**_plan_summary(plan), "data": plan.data}
+
+
+@app.delete("/api/plans/{plan_id}")
+def delete_plan(
+    plan_id: int,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, bool]:
+    plan = _owned_plan(session, user, plan_id)
+    session.delete(plan)
+    session.commit()
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# Prices
+# --------------------------------------------------------------------------
+
+@app.get("/api/search")
+def search(
+    q: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(10, ge=1, le=50),
+    store: Optional[str] = Query(None, description="Comma-separated store names."),
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Search both supermarkets, with pack size and per-kg price intact."""
+    wanted = [s.strip() for s in store.split(",")] if store else None
+    return pricing.search_all(session, q, limit=limit, store_names=wanted)
+
+
+@app.get("/api/compare")
+def compare(
+    food: str = Query(..., min_length=1, max_length=300),
+    query: Optional[str] = Query(None, max_length=300),
+    pack: Optional[float] = Query(None, gt=0, le=100_000),
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Price one food at both supermarkets and say which is cheaper."""
+    return pricing.compare_food(session, food, query or food, target_pack_g=pack)
+
+
+@app.post("/api/recipes/generate")
+def generate_recipes(
+    body: GenerateRequest,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Compose recipes to the requested targets and cost the shopping list.
+
+    Each line is priced at every requested store, so the list shows where each
+    ingredient is cheapest rather than assuming one supermarket.
+    """
+    security.enforce(security.refresh_by_user, str(user.id),
+                     "recipe builds")
+    built = recipes.build_plan(
+        seed=body.seed, meals=body.meals, servings=body.servings,
+        kcal_per_serving=body.kcal_per_serving,
+        protein_per_serving=body.protein_per_serving,
+        diet=body.diet, exclude=body.exclude, cuisine=body.cuisine,
+    )
+    shop = recipes.shopping_list(built)
+
+    if not body.price:
+        return {"recipes": built, "shop": shop, "priced": False}
+
+    priced: Dict[str, Any] = {}
+    basket: Dict[str, float] = {s: 0.0 for s in body.stores}
+    best_total = 0.0
+    for food, line in shop.items():
+        comparison = pricing.compare_food(
+            session, food, line["woo"], target_pack_g=line.get("pack"),
+            store_names=body.stores)
+        packs = line.get("packsNeeded") or 1
+        per_store = {}
+        for name, r in comparison["byStore"].items():
+            cost = round(r["price"] * packs, 2) if r.get("price") else None
+            per_store[name] = {
+                "perKg": r.get("per_kg"), "packPrice": r.get("price"),
+                "lineCost": cost, "matched": r.get("matched_name"),
+                "needsReview": r.get("needs_review"),
+                "onSpecial": r.get("on_special"),
+            }
+            if cost is not None and name in basket:
+                basket[name] += cost
+        cheapest = comparison.get("cheapest")
+        if cheapest and per_store.get(cheapest, {}).get("lineCost"):
+            best_total += per_store[cheapest]["lineCost"]
+        priced[food] = {
+            **line, "byStore": per_store, "cheapest": cheapest,
+            "saving": comparison.get("saving"), "packsNeeded": packs,
+        }
+
+    return {
+        "recipes": built,
+        "shop": priced,
+        "priced": True,
+        "totals": {
+            "byStore": {k: round(v, 2) for k, v in basket.items()},
+            "cheapestMixed": round(best_total, 2),
+        },
+    }
+
+
+@app.post("/api/recipes/import")
+def import_recipe(
+    body: ImportRequest,
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """Read a recipe from a page the user links to.
+
+    An importer, not a search engine: the method text belongs to whoever wrote
+    it, so this fetches one page on request, keeps it for that account, and
+    credits the source rather than building a searchable store of other
+    people's writing.
+    """
+    security.enforce(security.import_by_user, str(user.id), "recipe imports")
+    result = recipe_import.fetch(body.url)
+    if result.get("status") != "success":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            result.get("message", "Could not read that page."))
+    scaled = recipe_import.scale_recipe(
+        result["recipe"], body.servings, body.system)
+    return {"recipe": scaled}
+
+
+@app.post("/api/recipes/rescale")
+def rescale_recipe(
+    body: RescaleRequest,
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """Re-present an already-imported recipe at a new size or unit system."""
+    return {"recipe": recipe_import.scale_recipe(
+        body.recipe, body.servings, body.system)}
+
+
+@app.post("/api/recipes/options")
+def recipe_options(
+    body: GenerateRequest,
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """Several different recipes for one slot, labelled A, B, C.
+
+    Used by the builder so a meal can be chosen rather than accepted.
+    """
+    options = recipes.build_options(
+        seed=body.seed, count=min(body.meals, 5), servings=body.servings,
+        kcal_per_serving=body.kcal_per_serving,
+        protein_per_serving=body.protein_per_serving,
+        diet=body.diet, exclude=body.exclude, cuisine=body.cuisine,
+    )
+    return {"options": options}
+
+
+@app.get("/api/price")
+def price(
+    food: str = Query(..., min_length=1, max_length=300),
+    query: Optional[str] = Query(None, max_length=300),
+    pack: Optional[float] = Query(None, gt=0, le=100_000),
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """Price one planned food on the plan's own basis."""
+    return resolve.resolve_food(food, query or food, target_pack_g=pack)
+
+
+def _record_price(
+    session: Session, user_id: int, result: Dict[str, Any], store: str
+) -> None:
+    """Store one reading, replacing today's earlier reading for that food."""
+    today = date.today().isoformat()
+    existing = session.scalar(
+        select(PriceRecord).where(
+            PriceRecord.user_id == user_id,
+            PriceRecord.food == result["food"],
+            PriceRecord.observed_on == today,
+            PriceRecord.source == "woolworths-api",
+        )
+    )
+    target = existing or PriceRecord(
+        user_id=user_id,
+        food=result["food"],
+        observed_on=today,
+        source="woolworths-api",
+    )
+    target.price = result["price"]
+    target.pack = result.get("pack")
+    target.per_kg = result.get("per_kg")
+    target.basis = result.get("basis", "gross")
+    target.store = store
+    target.matched_name = result.get("matched_name") or ""
+    target.stockcode = str(result.get("stockcode") or "")
+    target.on_special = bool(result.get("on_special"))
+    if existing is None:
+        session.add(target)
+
+
+@app.post("/api/plans/{plan_id}/refresh-prices")
+def refresh_prices(
+    plan_id: int,
+    body: RefreshRequest,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Re-price the plan's shopping list from live data.
+
+    Appends to each food's history rather than rewriting it, and holds back
+    low-confidence matches unless explicitly asked to apply them.
+    """
+    security.enforce(security.refresh_by_user, str(user.id),
+                     "price refreshes")
+    plan = _owned_plan(session, user, plan_id)
+    data = dict(plan.data or {})
+    # Copied one level deeper than looks necessary, on purpose. `plan.data` is
+    # a plain JSON column, so SQLAlchemy detects changes by comparing against
+    # the value it loaded -- and a nested dict mutated in place IS that value,
+    # so the comparison sees nothing new and skips the UPDATE entirely. When
+    # every price happened to match today's existing record, that silently
+    # discarded the picture this loop attaches.
+    shop = {k: dict(v or {}) for k, v in (data.get("shop") or {}).items()}
+    prices = dict(data.get("prices") or {})
+    today = date.today().isoformat()
+
+    applied: List[Dict[str, Any]] = []
+    review: List[Dict[str, Any]] = []
+
+    for food, meta in shop.items():
+        history = list(prices.get(food) or [])
+        previous = history[-1] if history else None
+        target_pack = (previous or {}).get("pack") or (meta or {}).get("pack")
+
+        comparison = pricing.compare_food(
+            session, food, (meta or {}).get("woo") or food,
+            target_pack_g=target_pack, store_names=body.stores)
+        # Prefer the cheapest confident match; fall back to whichever store
+        # answered at all so a single-store outage does not stall the refresh.
+        result = None
+        if comparison.get("cheapest"):
+            result = comparison["byStore"][comparison["cheapest"]]
+        else:
+            for candidate in comparison.get("byStore", {}).values():
+                if candidate.get("status") == "ok" and candidate.get("price"):
+                    result = candidate
+                    break
+        if result is None:
+            review.append({"food": food, "status": "not_found",
+                           "review_reasons": ["no store returned a usable price"],
+                           "previous": previous})
+            continue
+        result["previous"] = previous
+
+        usable = (
+            result["status"] == "ok"
+            and result.get("price") is not None
+            and result.get("pack")
+        )
+        if not usable:
+            review.append(result)
+            continue
+        if result.get("needs_review") and not body.apply_reviewed:
+            review.append(result)
+            continue
+
+        record = {
+            "price": result["price"],
+            "pack": result["pack"],
+            "date": today,
+            "store": body.store,
+            "source": "woolworths-api",
+            "matched": result["matched_name"],
+        }
+        if result.get("stockcode"):
+            record["stockcode"] = result["stockcode"]
+        if result.get("url"):
+            record["url"] = result["url"]
+        if result.get("on_special"):
+            record["onSpecial"] = True
+
+        if history and history[-1].get("date") == today:
+            history[-1] = record  # one reading per day
+        else:
+            history.append(record)
+        prices[food] = history
+        # Lines added by hand or imported have no picture; a refresh is the
+        # natural moment to attach one from whatever product matched.
+        if result.get("image") and not shop.get(food, {}).get("image"):
+            shop.setdefault(food, {})["image"] = result["image"]
+        if result.get("url") and not shop.get(food, {}).get("url"):
+            shop.setdefault(food, {})["url"] = result["url"]
+        _record_price(session, user.id, result, body.store)
+        applied.append(result)
+
+    data["prices"] = prices
+    data["shop"] = shop
+    plan.data = data
+    session.commit()
+
+    return {
+        "applied": len(applied),
+        "heldBack": len(review),
+        "changes": [
+            {
+                "food": r["food"],
+                "matched": r.get("matched_name"),
+                "perKg": r.get("per_kg"),
+                "previousPerKg": (
+                    r["previous"]["price"] / (r["previous"]["pack"] / 1000)
+                    if r.get("previous") and r["previous"].get("pack")
+                    else None
+                ),
+                "onSpecial": r.get("on_special"),
+            }
+            for r in applied
+        ],
+        "review": [
+            {
+                "food": r["food"],
+                "matched": r.get("matched_name"),
+                "perKg": r.get("per_kg"),
+                "reasons": r.get("review_reasons") or [r.get("message", "no match")],
+                "confidence": r.get("confidence"),
+            }
+            for r in review
+        ],
+    }
+
+
+@app.get("/api/price-history")
+def price_history(
+    food: Optional[str] = Query(None, max_length=300),
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Observed prices over time, for one food or all of them."""
+    stmt = select(PriceRecord).where(PriceRecord.user_id == user.id)
+    if food:
+        stmt = stmt.where(PriceRecord.food == food)
+    rows = session.scalars(stmt.order_by(PriceRecord.observed_on)).all()
+    return {
+        "records": [
+            {
+                "food": r.food,
+                "price": r.price,
+                "pack": r.pack,
+                "perKg": r.per_kg,
+                "basis": r.basis,
+                "store": r.store,
+                "matched": r.matched_name,
+                "onSpecial": r.on_special,
+                "date": r.observed_on,
+            }
+            for r in rows
+        ]
+    }
+
+
+# --------------------------------------------------------------------------
+# Recipe library
+# --------------------------------------------------------------------------
+
+def _recipe_json(recipe: Recipe) -> Dict[str, Any]:
+    # The stored payload is spread FIRST so the database columns win. A recipe
+    # from the builder carries its own "id" ("ragu-1") and "notes", and letting
+    # those overwrite the real row id makes every later PATCH or DELETE address
+    # a recipe that does not exist.
+    data = dict(recipe.data or {})
+    # Recipes saved before categories existed have none stored. Derive it from
+    # the ingredients on the way out, so an existing library groups properly
+    # instead of collapsing into "Other".
+    if not data.get("category"):
+        data["category"] = recipes.category_for(data)
+    return {
+        **data,
+        "id": recipe.id,
+        "name": recipe.name,
+        "rating": recipe.rating,
+        "notes": recipe.notes,
+        "timesCooked": recipe.times_cooked,
+        "updatedAt": recipe.updated_at.isoformat() if recipe.updated_at else None,
+    }
+
+
+def _owned_recipe(session: Session, user: User, recipe_id: int) -> Recipe:
+    recipe = session.get(Recipe, recipe_id)
+    if recipe is None or recipe.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Recipe not found.")
+    return recipe
+
+
+@app.get("/api/recipes")
+def list_recipes(
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """The saved library, best-rated first, then most recent."""
+    rows = session.scalars(
+        select(Recipe).where(Recipe.user_id == user.id)
+    ).all()
+    rows.sort(key=lambda r: (-(r.rating or 0), -(r.id or 0)))
+    return {"recipes": [_recipe_json(r) for r in rows]}
+
+
+@app.post("/api/recipes", status_code=status.HTTP_201_CREATED)
+def create_recipe(
+    body: RecipeIn,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    recipe = Recipe(user_id=user.id, name=body.name, data=body.data)
+    session.add(recipe)
+    session.commit()
+    return _recipe_json(recipe)
+
+
+@app.post("/api/recipes/save-many", status_code=status.HTTP_201_CREATED)
+def save_recipes(
+    body: SaveRecipesRequest,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Store a batch from the builder, skipping ones already saved by name."""
+    existing = {
+        r.name for r in session.scalars(
+            select(Recipe).where(Recipe.user_id == user.id)).all()
+    }
+    saved = []
+    for item in body.recipes:
+        name = str(item.get("name") or "").strip()[:300]
+        if not name or name in existing:
+            continue
+        payload = {k: v for k, v in item.items()
+                   if k not in ("name", "id", "rating", "notes", "timesCooked")}
+        recipe = Recipe(user_id=user.id, name=name, data=payload)
+        session.add(recipe)
+        saved.append(recipe)
+        existing.add(name)
+    session.commit()
+    return {"saved": len(saved), "skipped": len(body.recipes) - len(saved),
+            "recipes": [_recipe_json(r) for r in saved]}
+
+
+@app.patch("/api/recipes/{recipe_id}")
+def update_recipe(
+    recipe_id: int,
+    body: RecipePatch,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    recipe = _owned_recipe(session, user, recipe_id)
+    if body.name is not None:
+        recipe.name = body.name
+    if body.clear_rating:
+        recipe.rating = None
+    elif body.rating is not None:
+        recipe.rating = body.rating
+    if body.notes is not None:
+        recipe.notes = body.notes
+    if body.times_cooked is not None:
+        recipe.times_cooked = body.times_cooked
+    elif body.cooked:
+        # Never below zero -- an undo on a recipe never cooked is a no-op, not
+        # a negative count.
+        recipe.times_cooked = max(0, (recipe.times_cooked or 0) + body.cooked)
+    session.commit()
+    return _recipe_json(recipe)
+
+
+@app.delete("/api/recipes/{recipe_id}")
+def delete_recipe(
+    recipe_id: int,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, bool]:
+    recipe = _owned_recipe(session, user, recipe_id)
+    session.delete(recipe)
+    session.commit()
+    return {"ok": True}
+
+
+@app.post("/api/prices/manual")
+def manual_price(
+    body: ManualPrice,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Record a price you saw yourself.
+
+    Stored alongside scraped readings with source "manual", so a correction
+    shows up in the history and the graph rather than being lost.
+    """
+    today = date.today().isoformat()
+    existing = session.scalar(
+        select(PriceRecord).where(
+            PriceRecord.user_id == user.id,
+            PriceRecord.food == body.food,
+            PriceRecord.observed_on == today,
+            PriceRecord.source == "manual",
+        )
+    )
+    record = existing or PriceRecord(
+        user_id=user.id, food=body.food, observed_on=today, source="manual")
+    record.price = body.price
+    record.pack = body.pack
+    record.per_kg = (body.price / (body.pack / 1000)) if body.pack else None
+    record.basis = "gross"
+    record.store = body.store
+    record.matched_name = ""
+    if existing is None:
+        session.add(record)
+    session.commit()
+    return {"ok": True, "food": body.food, "price": body.price,
+            "pack": body.pack, "perKg": record.per_kg, "date": today}
+
+
+# --------------------------------------------------------------------------
+# Product catalogue
+# --------------------------------------------------------------------------
+
+@app.get("/api/catalogue")
+def catalogue(
+    q: str = Query("", max_length=200),
+    store: Optional[str] = Query(None, max_length=32),
+    on_special: bool = Query(False),
+    sort: str = Query("relevance"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Search the products this server has already seen. No network access."""
+    return pricing.catalogue_search(
+        session, query=q, store=store, on_special=on_special,
+        sort=sort, limit=limit, offset=offset)
+
+
+@app.get("/api/catalogue/stats")
+def catalogue_stats(
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """How many products have accumulated, per store."""
+    return pricing.catalogue_stats(session)
+
+
+@app.post("/api/plans/{plan_id}/shop-items", status_code=status.HTTP_201_CREATED)
+def add_shop_item(
+    plan_id: int,
+    body: ShopItemIn,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Put a product on the shopping list.
+
+    Accepts either a catalogue product (store + stockcode), in which case its
+    name, pack size and current price come along, or a plain food name typed by
+    hand.
+    """
+    plan = _owned_plan(session, user, plan_id)
+    data = dict(plan.data or {})
+    shop = dict(data.get("shop") or {})
+    prices = dict(data.get("prices") or {})
+
+    product = None
+    if body.store and body.stockcode:
+        product = session.scalar(
+            select(Product).where(Product.store == body.store,
+                                  Product.stockcode == body.stockcode))
+        if product is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND,
+                                "That product is not in the catalogue.")
+
+    name = (body.food or (product.name if product else "")).strip()
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Give the item a name.")
+    if name in shop:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f'"{name}" is already on the list.')
+
+    pack = body.pack or (product.pack_g if product else None)
+    shop[name] = {
+        "aisle": body.aisle,
+        "woo": body.query or (product.name if product else name),
+        "pack": pack,
+        "grams": body.grams or pack,
+        "packsNeeded": 1,
+    }
+    if product:
+        shop[name]["store"] = product.store
+        shop[name]["stockcode"] = product.stockcode
+        shop[name]["image"] = product.image or ""
+        shop[name]["url"] = product.url or ""
+
+    # Seed today's price from the catalogue so the line is costed immediately
+    # rather than showing a blank until the next refresh.
+    if product and product.pack_price and pack:
+        prices.setdefault(name, []).append({
+            "price": product.pack_price,
+            "pack": pack,
+            "date": date.today().isoformat(),
+            "store": product.store,
+            "source": "catalogue",
+            "matched": product.name,
+            "url": product.url or "",
+        })
+
+    data["shop"] = shop
+    data["prices"] = prices
+    plan.data = data
+    session.commit()
+    return {"ok": True, "food": name, "item": shop[name]}
+
+
+@app.delete("/api/plans/{plan_id}/shop-items/{food}")
+def remove_shop_item(
+    plan_id: int,
+    food: str,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, bool]:
+    """Take an item off the shopping list, leaving its price history alone."""
+    plan = _owned_plan(session, user, plan_id)
+    data = dict(plan.data or {})
+    shop = dict(data.get("shop") or {})
+    if food not in shop:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not on the list.")
+    del shop[food]
+    data["shop"] = shop
+    data["got"] = [g for g in (data.get("got") or []) if g != food]
+    plan.data = data
+    session.commit()
+    return {"ok": True}
+
+
+@app.get("/api/price-cache")
+def price_cache(
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """What the shared cache holds, and whether a store is paused."""
+    return pricing.cache_status(session)
+
+
+@app.get("/api/version")
+def version() -> Dict[str, Any]:
+    """What build this server is running.
+
+    The point of this is being able to confirm an update actually reached a
+    phone, rather than trusting that it did.
+    """
+    return {"version": APP_VERSION, "builtAt": BUILD_STAMP}
+
+
+@app.get("/api/cuisines")
+def cuisines(user: User = Depends(auth.current_user)) -> Dict[str, Any]:
+    """Themes the recipe builder can work to."""
+    return {"cuisines": recipes.cuisine_names()}
+
+
+@app.get("/api/health")
+def health() -> Dict[str, Any]:
+    return {"status": "ok", "stores": list(stores.ALL_STORES)}
+
+
+@app.get("/api/trickle")
+def trickle_status(
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """Whether the slow background catalogue top-up is running."""
+    return trickle.status()
+
+
+# --------------------------------------------------------------------------
+# Frontend -- served from the same origin, so no CORS and no artifact CSP.
+# --------------------------------------------------------------------------
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/sw.js")
+def service_worker() -> FileResponse:
+    # Served from the root so its scope is the whole app: a worker registered
+    # from /static could only ever control /static. The StaticFiles mount also
+    # shadows any route under /static, so this could not live there anyway.
+    return FileResponse(
+        STATIC_DIR / "sw.js",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/manifest.webmanifest")
+def manifest() -> FileResponse:
+    return FileResponse(STATIC_DIR / "manifest.webmanifest",
+                        media_type="application/manifest+json")
+
+
+@app.exception_handler(404)
+def not_found(request, exc):
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    return FileResponse(STATIC_DIR / "index.html", status_code=200)

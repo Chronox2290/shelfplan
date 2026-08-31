@@ -1,0 +1,73 @@
+# Shelf Plan for a NAS -- Synology Container Manager, QNAP Container Station,
+# Unraid, TrueNAS Scale, or anything else that runs Compose.
+#
+# This pulls a prebuilt image instead of building from source. A NAS takes
+# 15-40 minutes to compile Python packages for ARM; pulling takes about a
+# minute, and the image is built for both amd64 and arm64.
+#
+#   1. Put this file and .env in a folder on the NAS.
+#   2. Set SESSION_SECRET in .env.
+#   3. docker compose -f docker-compose.nas.yml up -d
+#
+# Watchtower keeps it current: when a new image is published, it pulls and
+# restarts within the hour, with no action needed on the NAS. Drop that service
+# if you would rather update by hand.
+
+services:
+  shelfplan:
+    image: ${SHELFPLAN_IMAGE:-ghcr.io/chronox2290/shelfplan:latest}
+    container_name: shelfplan
+    restart: unless-stopped
+    ports:
+      - "${SHELFPLAN_PORT:-8000}:8000"
+    environment:
+      SESSION_SECRET: "${SESSION_SECRET:?set SESSION_SECRET in .env before starting}"
+      # 0 while you reach it over plain http on the home network. Set to 1 once
+      # it is behind https, whether that is Tailscale, a tunnel or a proxy.
+      COOKIE_SECURE: "${COOKIE_SECURE:-0}"
+      DATABASE_URL: "sqlite:////app/data/shelfplan.db"
+      # open | invite | closed. A NAS on a home network is usually fine as
+      # open; switch to invite before exposing it beyond the house.
+      SIGNUP_MODE: "${SIGNUP_MODE:-open}"
+      SIGNUP_INVITE_CODE: "${SIGNUP_INVITE_CODE:-}"
+      PUBLIC_URL: "${PUBLIC_URL:-}"
+      # Password reset mail. Without these the reset link is written to the
+      # container log instead.
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+      # Slow background top-up of the product catalogue. A NAS is on all day,
+      # which is exactly when this is worth having.
+      TRICKLE: "${TRICKLE:-1}"
+      TRICKLE_INTERVAL_SECONDS: "${TRICKLE_INTERVAL_SECONDS:-180}"
+    volumes:
+      # A bind mount rather than a named volume, so the database sits somewhere
+      # the NAS backup software can actually see it.
+      - ${SHELFPLAN_DATA:-./data}:/app/data
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status==200 else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # Optional. Checks hourly for a newer image and restarts into it.
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: shelfplan-watchtower
+    restart: unless-stopped
+    environment:
+      # Only touch containers that opted in with the label above, so this can
+      # never restart anything else running on the NAS.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_POLL_INTERVAL: "${UPDATE_CHECK_SECONDS:-3600}"
+      WATCHTOWER_INCLUDE_RESTARTING: "true"
+      TZ: "${TZ:-Australia/Melbourne}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

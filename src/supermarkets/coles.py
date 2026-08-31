@@ -1,12 +1,21 @@
+"""Legacy Coles client for the key-based /api/bff/products route.
+
+Superseded by coles_catalog.py, which needs no key. Kept because the MCP tool
+`get_coles_products` still exposes it, and it works for anyone who has a
+subscription key.
+
+This module deliberately does NOT call load_dotenv(): a library that mutates
+os.environ on import leaks configuration into everything that imports it, which
+is how an unrelated SMTP setting once ended up changing the behaviour of the
+password-reset tests. The application loads its own environment.
+"""
+
 from typing import Dict, Any, List
 import re
 import requests
 import json
 from datetime import datetime
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # Store information
 STORE_NAME = "coles"
