@@ -21,8 +21,9 @@ from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.supermarkets import (catalog, recipe_import,  # noqa: E402
-                              recipes, resolve, stores)
+from src.supermarkets import (barcode as barcode_lib,  # noqa: E402
+                              catalog, recipe_import, recipes,
+                              resolve, stores)
 
 from . import auth, mailer, passwords, pricing, security, trickle  # noqa: E402
 from .db import (Plan, PlanVersion, PriceRecord, Product,  # noqa: E402
@@ -656,6 +657,38 @@ def recipe_options(
     return {"options": options}
 
 
+@app.get("/api/barcode/{code}")
+def scan_barcode(
+    code: str,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """What a scanned barcode is.
+
+    Checks what this server already knows before asking anyone, so a repeat
+    scan of the same tin costs nothing and works offline from the stores.
+    """
+    clean = barcode_lib.normalise(code)
+    if not barcode_lib.valid(clean):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "That is not a readable barcode.")
+
+    known = pricing.by_barcode(session, clean)
+    if known:
+        return {"status": "success", "barcode": clean, "product": known,
+                "nutrition": None, "sources": ["catalogue"], "cached": True}
+
+    security.enforce(security.import_by_user, str(user.id), "barcode lookups")
+    result = barcode_lib.look_up(clean)
+    if result.get("status") == "success" and result.get("product"):
+        # Remember it, so the next scan of this product is instant.
+        try:
+            pricing.remember_products(session, "woolworths", [result["product"]])
+        except Exception:  # noqa: BLE001
+            session.rollback()
+    return result
+
+
 @app.get("/api/swaps")
 def swaps(
     food: str = Query(..., min_length=1, max_length=300),
@@ -1225,6 +1258,28 @@ def service_worker() -> FileResponse:
         media_type="application/javascript",
         headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
     )
+
+
+@app.get("/.well-known/assetlinks.json")
+def asset_links() -> Any:
+    """Proves this site and the Android app belong to the same owner.
+
+    Without this the app opens with a browser address bar across the top; with
+    it, it runs full screen like any other app. The fingerprint is of the key
+    the APK was signed with, set as TWA_FINGERPRINT.
+    """
+    fingerprint = os.getenv("TWA_FINGERPRINT", "").strip()
+    package = os.getenv("TWA_PACKAGE", "au.com.chronox.shelfplan").strip()
+    if not fingerprint:
+        return JSONResponse([], status_code=200)
+    return JSONResponse([{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": package,
+            "sha256_cert_fingerprints": [fingerprint],
+        },
+    }])
 
 
 @app.get("/manifest.webmanifest")

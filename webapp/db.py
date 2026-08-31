@@ -212,6 +212,7 @@ class Product(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     store: Mapped[str] = mapped_column(String(32), index=True)
     stockcode: Mapped[str] = mapped_column(String(40), index=True)
+    barcode: Mapped[str] = mapped_column(String(20), default="", index=True)
     name: Mapped[str] = mapped_column(String(300), index=True)
     # Lowercased name, so a LIKE search does not depend on collation.
     search_key: Mapped[str] = mapped_column(String(300), index=True)
@@ -244,6 +245,12 @@ def _migrate(connection) -> None:
     if rows and not any(r[1] == "session_version" for r in rows):
         connection.execute(text(
             "ALTER TABLE users ADD COLUMN session_version INTEGER DEFAULT 1"))
+        connection.commit()
+
+    rows = connection.execute(text("PRAGMA table_info(products)")).fetchall()
+    if rows and not any(r[1] == "barcode" for r in rows):
+        connection.execute(text(
+            "ALTER TABLE products ADD COLUMN barcode VARCHAR(20) DEFAULT ''"))
         connection.commit()
 
 

@@ -111,6 +111,7 @@ def normalise(product: Dict[str, Any]) -> Dict[str, Any]:
         "name": product.get("DisplayName") or product.get("Name") or "",
         "brand": product.get("Brand") or "",
         "stockcode": product.get("Stockcode"),
+        "barcode": str(product.get("Barcode") or ""),
         "pack_price": pack_price,
         "pack_g": round(pack_g) if pack_g is not None else None,
         "per_kg": round(per_kg, 2) if per_kg is not None else None,

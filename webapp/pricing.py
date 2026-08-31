@@ -151,6 +151,7 @@ def remember_products(session: Session, store: str,
             added += 1
         row.name = name[:300]
         row.search_key = name.lower()[:300]
+        row.barcode = str(item.get("barcode") or "")[:20]
         row.brand = (item.get("brand") or "")[:120]
         row.package_size = (item.get("package_size") or "")[:80]
         row.pack_g = item.get("pack_g")
@@ -382,6 +383,7 @@ def catalogue_search(
         "products": [
             {
                 "id": r.id, "store": r.store, "stockcode": r.stockcode,
+                "barcode": r.barcode,
                 "name": r.name, "brand": r.brand,
                 "package_size": r.package_size, "pack_g": r.pack_g,
                 "pack_price": r.pack_price, "per_kg": r.per_kg,
@@ -405,4 +407,20 @@ def catalogue_stats(session: Session) -> Dict[str, Any]:
         "byStore": {store: count for store, count in rows},
         "total": sum(c for _, c in rows),
         "onSpecial": specials,
+    }
+
+
+def by_barcode(session: Session, code: str) -> Optional[Dict[str, Any]]:
+    """A product already in the catalogue, found by its barcode."""
+    from .db import Product
+    row = session.scalar(select(Product).where(Product.barcode == code))
+    if row is None:
+        return None
+    return {
+        "id": row.id, "store": row.store, "stockcode": row.stockcode,
+        "barcode": row.barcode, "name": row.name, "brand": row.brand,
+        "package_size": row.package_size, "pack_g": row.pack_g,
+        "pack_price": row.pack_price, "per_kg": row.per_kg,
+        "cup_string": row.cup_string, "on_special": row.on_special,
+        "in_stock": row.in_stock, "url": row.url, "image": row.image,
     }

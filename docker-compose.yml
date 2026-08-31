@@ -27,6 +27,10 @@ services:
       # every couple of minutes, which never looks like a crawl. Off unless
       # you set TRICKLE=1.
       APP_VERSION: "${APP_VERSION:-dev}"
+      # Android app: the signing fingerprint of the APK, so the site can
+      # vouch for it and the app runs without a browser bar.
+      TWA_FINGERPRINT: "${TWA_FINGERPRINT:-}"
+      TWA_PACKAGE: "${TWA_PACKAGE:-au.com.chronox.shelfplan}"
       TRICKLE: "${TRICKLE:-0}"
       TRICKLE_INTERVAL_SECONDS: "${TRICKLE_INTERVAL_SECONDS:-120}"
       TRICKLE_STORES: "${TRICKLE_STORES:-coles,woolworths}"

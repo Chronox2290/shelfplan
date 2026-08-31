@@ -1302,7 +1302,10 @@ function viewSearch() {
         ? 'e.g. greek yoghurt' : 'e.g. rolled oats'}" value="${esc(find.q)}"
         style="flex:1;min-width:180px">
       <button id="goSearch" class="primary">Search</button>
+      ${scanButton()}
     </div>
+    ${scannerSupported() ? '' : `<p class="muted small" style="margin:8px 0 0">
+      Barcode scanning needs Chrome on Android; this browser has no scanner.</p>`}
 
     <div class="row" style="margin-top:10px">
       <select id="fStore" style="width:auto">
@@ -1460,6 +1463,9 @@ function guessAisle(name) {
 }
 
 function wireSearch() {
+  const scanOpen = $('scanOpen');
+  if (scanOpen) scanOpen.addEventListener('click', openScanner);
+
   document.querySelectorAll('[data-mode]').forEach((b) => {
     b.addEventListener('click', () => {
       find.mode = b.dataset.mode;
@@ -2045,6 +2051,221 @@ function wireFindRecipe() {
   if (go) go.addEventListener('click', run);
   if (url) url.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
   if (found.recipe) wireFound();
+}
+
+/* ---------------------------------------------------------------- scanner */
+
+const scan = { stream: null, running: false, detector: null, last: '', result: null };
+
+// Chrome on Android ships a barcode detector, so no library is needed and
+// nothing extra is downloaded. Everywhere else falls back to typing the number.
+function scannerSupported() {
+  return typeof window.BarcodeDetector === 'function'
+    && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+function scanButton() {
+  if (!scannerSupported()) return '';
+  return `<button id="scanOpen" class="primary">Scan a barcode</button>`;
+}
+
+function scannerSheet() {
+  return `<div class="sheet-back" id="scanBack"></div>
+    <div class="sheet scan-sheet" role="dialog" aria-label="Scan a barcode">
+      <div class="sheet-top">
+        <div><h3 style="margin:0">Point at a barcode</h3>
+          <p class="muted small" id="scanHint" style="margin:2px 0 0">
+            Starting the camera&hellip;</p></div>
+        <button class="ghost" id="scanClose">Close</button>
+      </div>
+      <div class="scan-view">
+        <video id="scanVideo" playsinline muted></video>
+        <div class="scan-frame"></div>
+      </div>
+      <div id="scanOut" style="margin-top:12px"></div>
+    </div>`;
+}
+
+async function openScanner() {
+  const host = document.createElement('div');
+  host.id = 'scanHost';
+  host.innerHTML = scannerSheet();
+  document.body.appendChild(host);
+
+  const close = () => { stopScanner(); host.remove(); };
+  $('scanBack').addEventListener('click', close);
+  $('scanClose').addEventListener('click', close);
+
+  const video = $('scanVideo');
+  try {
+    scan.stream = await navigator.mediaDevices.getUserMedia({
+      // The rear camera is the one pointing at the tin.
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
+      audio: false,
+    });
+    video.srcObject = scan.stream;
+    await video.play();
+    $('scanHint').textContent = 'Hold the barcode inside the frame.';
+  } catch (err) {
+    $('scanHint').textContent = 'Camera unavailable.';
+    $('scanOut').innerHTML = `<div class="err">${esc(
+      err && err.name === 'NotAllowedError'
+        ? 'Camera permission was declined. Allow it for this site, or type the number in instead.'
+        : 'Could not start the camera: ' + (err.message || err))}</div>
+      ${manualEntryHtml()}`;
+    wireManualEntry();
+    return;
+  }
+
+  scan.detector = new window.BarcodeDetector({
+    formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'],
+  });
+  scan.running = true;
+  tickScanner(video);
+}
+
+async function tickScanner(video) {
+  if (!scan.running) return;
+  try {
+    const codes = await scan.detector.detect(video);
+    const hit = codes.find((c) => (c.rawValue || '').length >= 6);
+    if (hit && hit.rawValue !== scan.last) {
+      scan.last = hit.rawValue;
+      if (navigator.vibrate) navigator.vibrate(40);
+      await handleScan(hit.rawValue);
+    }
+  } catch (_) { /* a frame that will not decode is normal */ }
+  // requestAnimationFrame would run far faster than any barcode needs and
+  // flattens the phone's battery for nothing.
+  if (scan.running) setTimeout(() => tickScanner(video), 250);
+}
+
+function stopScanner() {
+  scan.running = false;
+  if (scan.stream) {
+    scan.stream.getTracks().forEach((t) => t.stop());
+    scan.stream = null;
+  }
+}
+
+function manualEntryHtml() {
+  return `<div class="row" style="margin-top:10px">
+    <input id="scanManual" inputmode="numeric" placeholder="or type the number"
+      style="flex:1;min-width:150px">
+    <button id="scanManualGo">Look up</button>
+  </div>`;
+}
+
+function wireManualEntry() {
+  const go = $('scanManualGo');
+  const input = $('scanManual');
+  if (!go || !input) return;
+  const run = () => handleScan(input.value.trim());
+  go.addEventListener('click', run);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+}
+
+async function handleScan(code) {
+  const out = $('scanOut');
+  out.innerHTML = '<div class="note">Looking that up&hellip;</div>';
+  try {
+    const res = await api('/barcode/' + encodeURIComponent(code));
+    scan.result = res;
+    out.innerHTML = renderScan(res);
+    wireScanResult();
+  } catch (err) {
+    out.innerHTML = `<div class="err">${esc(err.message)}</div>${manualEntryHtml()}`;
+    wireManualEntry();
+    // Let the same code be tried again after a failure.
+    scan.last = '';
+  }
+}
+
+function renderScan(res) {
+  if (res.status !== 'success') {
+    return `<div class="warn">${esc(res.message || 'Nothing found for that code.')}</div>
+      ${manualEntryHtml()}`;
+  }
+
+  const p = res.product;
+  const n = res.nutrition;
+  const macros = n && n.nutrition ? n.nutrition : null;
+  const name = (p && p.name) || (n && n.name) || 'Unnamed product';
+  const image = (p && p.image) || (n && n.image) || '';
+
+  const price = p && p.pack_price
+    ? `<div class="row" style="gap:14px"><b class="num">${money(p.pack_price)}</b>
+        ${p.per_kg ? `<span class="muted num">${money(p.per_kg)}/kg</span>` : ''}
+        ${p.on_special ? '<span class="tag ok">special</span>' : ''}</div>`
+    : '<p class="muted small" style="margin:0">No price found at Woolworths.</p>';
+
+  const nutrition = macros ? `<div class="macros num" style="margin-top:10px">
+      ${macros.kcal != null ? `<span><b>${macros.kcal}</b> kcal</span>` : ''}
+      ${macros.p != null ? `<span><b>${macros.p}</b>g protein</span>` : ''}
+      ${macros.c != null ? `<span><b>${macros.c}</b>g carb</span>` : ''}
+      ${macros.f != null ? `<span><b>${macros.f}</b>g fat</span>` : ''}
+      ${macros.fb != null ? `<span><b>${macros.fb}</b>g fibre</span>` : ''}
+      <span class="muted">per 100g</span></div>` : '';
+
+  const where = (res.sources || []).map((sname) =>
+    `<span class="tag">${esc({ catalogue: 'already indexed',
+      woolworths: 'Woolworths', openfoodfacts: 'Open Food Facts' }[sname] || sname)}</span>`
+  ).join(' ');
+
+  return `<div class="card" style="margin:0">
+    <div class="row" style="align-items:flex-start">
+      ${thumb({ image, name })}
+      <div style="flex:1;min-width:0">
+        <b>${esc(name)}</b>
+        <div class="muted small">${esc((p && p.package_size) || (n && n.package_size) || '')}
+          &middot; ${esc(res.barcode)}</div>
+        <div style="margin-top:6px">${price}</div>
+      </div>
+    </div>
+    ${nutrition}
+    <div class="row" style="margin-top:12px">${where}<div style="flex:1"></div>
+      <button class="tiny primary" id="scanAdd">Add to shopping list</button>
+      <button class="tiny" id="scanAgain">Scan another</button>
+    </div>
+  </div>`;
+}
+
+function wireScanResult() {
+  const add = $('scanAdd');
+  if (add) {
+    add.addEventListener('click', async () => {
+      const res = scan.result;
+      const p = res.product;
+      const n = res.nutrition;
+      add.disabled = true;
+      add.textContent = 'Adding…';
+      try {
+        const body = p && p.stockcode
+          ? { store: p.store || 'woolworths', stockcode: String(p.stockcode),
+              aisle: guessAisle(p.name) }
+          : { food: (n && n.name) || 'Scanned item',
+              aisle: guessAisle((n && n.name) || ''),
+              pack: (n && n.pack_g) || null };
+        await api('/plans/' + state.planId + '/shop-items',
+          { method: 'POST', body });
+        await loadPlan();
+        add.textContent = 'On the list';
+      } catch (err) {
+        add.disabled = false;
+        add.textContent = 'Add to shopping list';
+        $('scanOut').insertAdjacentHTML('beforeend',
+          `<div class="err" style="margin-top:8px">${esc(err.message)}</div>`);
+      }
+    });
+  }
+  const again = $('scanAgain');
+  if (again) {
+    again.addEventListener('click', () => {
+      scan.last = '';
+      scan.result = null;
+      $('scanOut').innerHTML = '';
+    });
+  }
 }
 
 /* ------------------------------------------------------------------- boot */

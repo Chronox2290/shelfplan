@@ -195,6 +195,8 @@ def normalise(product: Dict[str, Any]) -> Dict[str, Any]:
         "name": full_name,
         "brand": brand,
         "stockcode": product.get("id"),
+        # Coles does not publish a barcode in the search payload.
+        "barcode": "",
         "pack_price": pack_price,
         "pack_g": round(pack_g) if pack_g is not None else None,
         "per_kg": round(per_kg, 2) if per_kg is not None else None,

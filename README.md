@@ -935,3 +935,70 @@ The fault that prompted it: normalising a week to seven days *replaced* the
 whole array whenever its length differed, discarding every planned meal, and
 the next save made that permanent. It now pads and preserves, and folds any
 extra days onto the last rather than dropping them.
+
+## Barcode scanning
+
+The **Scan a barcode** button on Find food opens the camera and reads the code,
+then answers from three places in order:
+
+1. **The local catalogue** -- instant, and works while a store is blocking us.
+2. **Woolworths.** Their search takes a barcode directly and returns the exact
+   product with its current price.
+3. **Open Food Facts.** An openly licensed database of packaged food. No price,
+   but usually the nutrition panel -- the part a supermarket listing lacks.
+
+One scan therefore gives both:
+
+```
+Woolworths Full Cream Milk 3L        $5.16 / 3000g   $1.72/kg
+per 100g   63.2 kcal  3.3g protein  4.8g carb  3.4g fat
+```
+
+Anything scanned is stored with its barcode, so scanning the same tin again
+costs nothing. **Add to shopping list** puts it straight on the list with its
+pack size and price.
+
+Uses the browser's own `BarcodeDetector`, so nothing is downloaded and no
+library is involved. That exists in Chrome on Android; elsewhere the sheet
+offers a box to type the number into instead. The camera needs **https** --
+browsers refuse it otherwise, localhost excepted.
+
+## An Android app
+
+The web app is already installable: on Android, Chrome offers **Install** and
+it lands in the app drawer, full screen, updating whenever you publish because
+the content is served rather than bundled.
+
+For a real APK -- one that installs like any other app and can be sideloaded --
+`scripts/build_android.sh` builds a **Trusted Web Activity** with Bubblewrap:
+
+```bash
+bash scripts/build_android.sh https://your-app-address
+adb install -r android/app-release-signed.apk
+```
+
+The shell is a thin wrapper around the site, so **updates still arrive by
+publishing the web app**. The APK only needs rebuilding if the name, icon or
+address changes.
+
+### It needs https first
+
+Android refuses to build a TWA over plain http, because the app cannot
+otherwise prove the site belongs to whoever signed it. Two things are required:
+
+* **An https address.** Tailscale gives one free with a real certificate, but
+  TLS certificates must be switched on for the tailnet first -- the admin
+  console, DNS page, *HTTPS Certificates*. Without it `tailscale cert` answers
+  *"your Tailscale account does not support getting TLS certs"*. Then:
+
+  ```bash
+  tailscale serve --bg --https=443 http://127.0.0.1:8000
+  ```
+
+* **The app's fingerprint on the server.** The build script prints it; put it in
+  `.env` as `TWA_FINGERPRINT` and restart. The server publishes it at
+  `/.well-known/assetlinks.json`, which is what removes the browser bar from
+  the top of the app.
+
+Keep `android.keystore` and its password. Losing them means a later build can
+only replace the app, never update it.
