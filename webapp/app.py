@@ -26,8 +26,8 @@ from src.supermarkets import (barcode as barcode_lib,  # noqa: E402
                               catalog, recipe_import, recipes,
                               resolve, stores, weekplan)
 
-from . import (auth, autoprice, mailer, passwords, pricing, security,  # noqa: E402
-               trickle)
+from . import (auth, autoprice, imageproxy, mailer, passwords, pricing,  # noqa: E402
+               security, trickle)
 from .db import (Plan, PlanVersion, PriceRecord, Product,  # noqa: E402
                  Recipe, User, get_session, init_db)
 
@@ -196,6 +196,9 @@ class AutoPlanRequest(BaseModel):
     # What the week's shopping should come to. Meal prep is repetitive on
     # purpose, and repetition is what keeps a trolley affordable.
     budget: Optional[float] = Field(default=None, ge=20, le=2000)
+    # Breakfast smaller than dinner, or three identical portions. Batch-cooking
+    # one dish for the whole day is a real way to eat, so it stays a choice.
+    even_meals: bool = Field(default=False)
 
 
 class RebalanceRequest(BaseModel):
@@ -985,6 +988,9 @@ def autoplan(
     for sitting in sittings:
         covers = 1 if sitting == "breakfast" else shared
         need_each = max(3, -(-body.days * covers // repeats) + 1)
+        # Breakfast is not a third of the day. Building every sitting to the
+        # same numbers is what made every meal 600 kcal and interchangeable.
+        share = recipes.share_for(sitting, body.meals_per_day, body.even_meals)
         have = sum(1 for r in rows
                    if weekplan.recipe_suits(_recipe_json(r), sitting))
         if have >= need_each:
@@ -996,10 +1002,8 @@ def autoplan(
             # Aim under the ceiling and over the floor. Dividing them evenly
             # leaves the packer no room at all: three meals at exactly a third
             # of the ceiling fail the day on the first rounding.
-            kcal_per_serving=max(
-                200.0, body.ceiling / max(1, body.meals_per_day) * 0.9),
-            protein_per_serving=max(
-                10.0, body.floor_protein / max(1, body.meals_per_day) * 1.15),
+            kcal_per_serving=max(200.0, body.ceiling * share * 0.9),
+            protein_per_serving=max(10.0, body.floor_protein * share * 1.15),
             diet=body.diet or "any", cuisine=body.cuisine or "any",
             meals_wanted=[sitting],
             prices=prices, cost_ceiling=protein_rate,
@@ -1007,12 +1011,9 @@ def autoplan(
             # protein alone, and every composed day then lands on target for
             # both and short on fibre -- which is exactly the miss the planner
             # was asked to avoid.
-            targets={"kcal": max(200.0, body.ceiling
-                                 / max(1, body.meals_per_day) * 0.9),
-                     "protein": max(10.0, body.floor_protein
-                                    / max(1, body.meals_per_day) * 1.15),
-                     "fibreMin": max(2.0, body.floor_fibre
-                                     / max(1, body.meals_per_day) * 1.15)})
+            targets={"kcal": max(200.0, body.ceiling * share * 0.9),
+                     "protein": max(10.0, body.floor_protein * share * 1.15),
+                     "fibreMin": max(2.0, body.floor_fibre * share * 1.15)})
         for item in (fresh or []):
             name = str(item.get("name") or "").strip()[:300]
             if not name or name in existing:
@@ -1050,18 +1051,21 @@ def autoplan(
                 seed=f"thrift:{user.id}:{plan_id}:{sitting}:{len(rows)}",
                 meals=4, servings=4,
                 kcal_per_serving=max(
-                    200.0, body.ceiling / max(1, body.meals_per_day) * 0.9),
+                    200.0, body.ceiling * recipes.share_for(
+                        sitting, body.meals_per_day, body.even_meals) * 0.9),
                 protein_per_serving=max(
-                    10.0, body.floor_protein / max(1, body.meals_per_day) * 1.15),
+                    10.0, body.floor_protein * recipes.share_for(
+                        sitting, body.meals_per_day, body.even_meals) * 1.15),
                 diet=body.diet or "any", cuisine=body.cuisine or "any",
                 meals_wanted=[sitting], prices=prices,
                 cost_ceiling=protein_rate or 0.1,
-                targets={"kcal": max(200.0, body.ceiling
-                                     / max(1, body.meals_per_day) * 0.9),
-                         "protein": max(10.0, body.floor_protein
-                                        / max(1, body.meals_per_day) * 1.15),
-                         "fibreMin": max(2.0, body.floor_fibre
-                                         / max(1, body.meals_per_day) * 1.15)})
+                targets={
+                    "kcal": max(200.0, body.ceiling * recipes.share_for(
+                        sitting, body.meals_per_day, body.even_meals) * 0.9),
+                    "protein": max(10.0, body.floor_protein * recipes.share_for(
+                        sitting, body.meals_per_day, body.even_meals) * 1.15),
+                    "fibreMin": max(2.0, body.floor_fibre * recipes.share_for(
+                        sitting, body.meals_per_day, body.even_meals) * 1.15)})
         # Try the plan before committing anything. A rejected attempt used to
         # leave its dishes in the library anyway, so the *next* plan picked
         # them up and came out worse -- a failed experiment quietly poisoning
@@ -1800,6 +1804,22 @@ def version() -> Dict[str, Any]:
     return {"version": APP_VERSION, "builtAt": BUILD_STAMP}
 
 
+@app.get("/api/profiles")
+def profiles(
+    weight: float = Query(80.0, ge=30, le=250),
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """The goal profiles, and what each works out to at a given weight."""
+    return {
+        "profiles": [
+            {**p, "targets": recipes.targets_for(p["id"], weight)}
+            for p in recipes.profile_names()
+        ],
+        "weight": weight,
+        "mealShare": recipes.MEAL_SHARE,
+    }
+
+
 @app.get("/api/cuisines")
 def cuisines(user: User = Depends(auth.current_user)) -> Dict[str, Any]:
     """Themes the recipe builder can work to."""
@@ -1817,6 +1837,29 @@ def trickle_status(
 ) -> Dict[str, Any]:
     """Whether the slow background catalogue top-up is running."""
     return trickle.status()
+
+
+@app.get("/api/image")
+def proxy_image(
+    url: str = Query(..., min_length=8, max_length=2000),
+    user: User = Depends(auth.current_user),
+) -> Response:
+    """A recipe's photograph, fetched by the server rather than the browser.
+
+    Signed in only, so this is not an open proxy sitting on someone's network.
+    """
+    try:
+        content_type, body = imageproxy.fetch(url)
+    except imageproxy.Refused as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    except Exception as exc:  # noqa: BLE001 -- a broken image is not a crash
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                            f"Could not fetch that image: {exc}")
+    return Response(
+        content=body,
+        media_type=content_type,
+        headers={"Cache-Control": f"private, max-age={imageproxy.CACHE_SECONDS}"},
+    )
 
 
 @app.get("/api/auto-price")

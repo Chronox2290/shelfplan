@@ -1480,6 +1480,83 @@ def _finish(recipe: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 # several candidates are built and the one that best satisfies everything asked
 # for wins. Anything still missed is reported rather than hidden.
 
+# How a day's energy actually falls across its meals. Splitting a day evenly is
+# the arithmetic answer and not how anyone eats: breakfast is smaller than
+# dinner in every country that has all three. Building every meal to the same
+# 600 kcal produces a plan of interchangeable lunches.
+#
+# An even split is still offered, because somebody batch-cooking one dish to
+# eat three times a day genuinely does want three identical portions. That is a
+# real way to eat and the choice belongs to the person, not to this table.
+MEAL_SHARE: Dict[str, float] = {
+    "breakfast": 0.25,
+    "lunch": 0.35,
+    "dinner": 0.40,
+}
+
+
+def share_for(meal: Optional[str], meals_per_day: int = 3,
+              even: bool = False) -> float:
+    """What fraction of the day this sitting is worth."""
+    if even or not meal or meal not in MEAL_SHARE:
+        return 1.0 / max(1, meals_per_day)
+    if meals_per_day == 3:
+        return MEAL_SHARE[meal]
+    # Away from three meals the named shares stop adding up, so they are
+    # rescaled rather than quietly over- or under-feeding the day.
+    total = sum(MEAL_SHARE.values())
+    return MEAL_SHARE[meal] / total
+
+
+# Targets for a day, by what somebody is trying to do. The protein figures are
+# grams per kilogram of bodyweight, which is how the research and every coach
+# states them; the app multiplies by the weight you give it.
+#
+# These are ordinary published ranges, not advice, and the page says so.
+PROFILES: Dict[str, Dict[str, Any]] = {
+    "lean": dict(
+        label="Losing fat",
+        kcalPerKg=26.0, proteinPerKg=2.2, fibrePer1000kcal=14.0,
+        note="A deficit with protein kept high, which is what protects muscle "
+             "while the weight comes off.",
+    ),
+    "maintain": dict(
+        label="Staying put",
+        kcalPerKg=33.0, proteinPerKg=1.8, fibrePer1000kcal=14.0,
+        note="Roughly what an averagely active person burns.",
+    ),
+    "build": dict(
+        label="Building muscle",
+        kcalPerKg=38.0, proteinPerKg=2.0, fibrePer1000kcal=12.0,
+        note="A modest surplus. Much more than this is mostly fat, whatever "
+             "the internet says.",
+    ),
+    "endurance": dict(
+        label="Training hard",
+        kcalPerKg=42.0, proteinPerKg=1.7, fibrePer1000kcal=12.0,
+        note="More carbohydrate to train on, protein still comfortably above "
+             "the minimum.",
+    ),
+}
+
+
+def targets_for(profile: str, weight_kg: float) -> Dict[str, float]:
+    """A day's numbers for a profile and a bodyweight."""
+    meta = PROFILES.get(profile) or PROFILES["maintain"]
+    weight = max(30.0, min(float(weight_kg or 80.0), 250.0))
+    kcal = round(meta["kcalPerKg"] * weight / 50) * 50
+    return {
+        "ceiling": float(kcal),
+        "floorP": float(round(meta["proteinPerKg"] * weight / 5) * 5),
+        "floorF": float(round(meta["fibrePer1000kcal"] * kcal / 1000)),
+    }
+
+
+def profile_names() -> List[Dict[str, str]]:
+    return [{"id": key, "label": meta["label"], "note": meta["note"]}
+            for key, meta in PROFILES.items()]
+
+
 DEFAULT_TARGETS: Dict[str, Any] = {
     "kcal": 600.0,       # per serving, aim
     "protein": 40.0,     # per serving, at least

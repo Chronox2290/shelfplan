@@ -171,13 +171,36 @@ def _round_nicely(value: float):
     return int(out) if float(out).is_integer() else out
 
 
-# Spoons and cups are how recipes are written in both systems, so they are not
-# converted -- only scaled. Turning "1 1/2 tsp salt" into "9 g salt" is
-# technically a conversion and practically useless: nobody weighs salt.
+# Spoons and cups are how recipes are written in both systems, so they stay
+# spoons and cups. Turning "1 1/2 tsp salt" into "9 g salt" is technically a
+# conversion and practically useless: nobody weighs salt.
+#
+# They are not the same size in both systems, though, and the tablespoon is not
+# close: an Australian one is 20ml and holds four teaspoons, an American one is
+# 15ml and holds three. Ignoring that leaves the metric/imperial switch doing
+# visibly nothing on a recipe written entirely in cups and spoons -- and quietly
+# wrong by a quarter on anything raised with bicarbonate.
 _COOKS_UNITS = {
     "cup", "cups", "c", "tablespoon", "tablespoons", "tbsp", "tbs",
     "teaspoon", "teaspoons", "tsp", "pinch", "pinches", "handful",
 }
+
+# Millilitres per unit, by system. Quantities are parsed as Australian, which
+# is what this app is for and what _VOLUME_ML already assumes.
+_COOKS_ML = {
+    "metric": {"cups": 250.0, "tbsp": 20.0, "tsp": 5.0},
+    "imperial": {"cups": 240.0, "tbsp": 15.0, "tsp": 5.0},
+}
+
+
+def _in_system(unit: str, qty: float, system: str) -> float:
+    """The same amount, counted in that system's version of the unit."""
+    here = _COOKS_ML.get(system) or _COOKS_ML["metric"]
+    mine = _COOKS_ML["metric"].get(unit)
+    theirs = here.get(unit)
+    if not mine or not theirs:
+        return qty
+    return qty * mine / theirs
 
 # Units a cook says out loud, in the singular, keyed by what recipes write.
 _UNIT_LABEL = {
@@ -210,10 +233,10 @@ def present(part: Dict[str, Any], system: str = "metric",
 
     # Cups and spoons: the same words in both systems. Scale, do not convert.
     if unit in _COOKS_UNITS:
-        scaled_qty = qty * scale
+        label = _UNIT_LABEL.get(unit, unit)
+        scaled_qty = _in_system(label, qty * scale, system)
         amount = _round_spoons(scaled_qty)
-        label = _plural(_UNIT_LABEL.get(unit, unit), scaled_qty)
-        return f"{amount} {label} {item}".strip()
+        return f"{amount} {_plural(label, scaled_qty)} {item}".strip()
 
     grams = part.get("grams")
     millilitres = part.get("millilitres")

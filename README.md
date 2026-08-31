@@ -1657,3 +1657,74 @@ simply no way to reach them, so a plan once made was permanent. Deleting says
 what goes with it — the week, the shopping list, the saved lists, the price
 history — because none of that is covered by Undo, which only reaches back
 through versions of a plan that still exists.
+
+## Metric and imperial, doing something
+
+The switch appeared dead, and on a recipe written entirely in cups and spoons
+it was: the previous fix stopped converting them at all, on the grounds that
+both systems use the same words.
+
+They do not use the same sizes. An Australian tablespoon is 20ml and holds four
+teaspoons; an American one is 15ml and holds three. Ignoring that left the
+switch visibly doing nothing *and* quietly wrong by a quarter on anything
+raised with bicarbonate. Quantities are read as Australian -- which is what
+this app is for -- and converted on the way out:
+
+```
+metric     2 cups white flour        2 1/2 tbsp extra flour
+imperial   2 1/8 cups white flour    3 1/3 tbsp extra flour
+```
+
+## The imported photograph
+
+Blocked by this app's own content security policy, which allows images from
+this server and the two supermarket CDNs and nothing else. Widening that to
+"any https host" would have worked and would also mean every recipe site you
+look at gets told your address.
+
+`webapp/imageproxy.py` fetches it server-side instead: https only, public
+addresses only -- checked after DNS resolution and again after any redirect,
+because a hostname can resolve to something on your own network and this runs
+on home networks behind Tailscale -- with a 4MB cap, a short timeout and a
+day's caching. Signed in only, so it is not an open proxy.
+
+The picture then still did not appear, for a second reason: `loading="lazy"`
+inside the scrolling panel never triggered, leaving an element with a valid
+src and an empty `currentSrc`. The one photograph at the top of a card somebody
+has chosen to look at does not need deferring.
+
+Saved imported recipes show their photograph too, which they never did.
+
+## A day has a shape
+
+The builder defaulted to 600 kcal a serving, which is a number for no meal in
+particular. Splitting a day evenly is the arithmetic answer and not how anyone
+eats -- breakfast is smaller than dinner in every country that has all three --
+but somebody batch-cooking one dish to eat three times genuinely does want
+three identical portions.
+
+So both, and the choice is stated rather than assumed: **breakfast smaller than
+dinner** (25 / 35 / 40) or **every meal the same size**. The planner builds
+each sitting to its share, and the builder can size a single recipe for a named
+sitting instead of a flat figure.
+
+The day's numbers themselves come from a goal and a bodyweight rather than
+being typed from nowhere -- losing fat, staying put, building muscle, training
+hard -- stated the way the research states them, in grams per kilogram:
+
+```
+at 90kg    losing fat  2350 kcal  200g protein  33g fibre
+           building    3400 kcal  180g protein  41g fibre
+```
+
+Published ranges, not advice, and the page says so.
+
+## Swapping a planned meal
+
+Removing a meal and adding another from the full list means doing the
+arithmetic yourself -- you wanted something else for Tuesday, not something
+that quietly costs the day forty grams of protein.
+
+**swap** on a planned meal offers the library sorted by how close each dish is
+to the one being replaced, restricted to that sitting, and says what the
+difference would be: `+88 kcal +26g P +1g F`, or "much the same".

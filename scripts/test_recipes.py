@@ -155,9 +155,12 @@ with TestClient(app) as c:
     breakfasts = [lib[m['recipeId']]['name'] for d in res['days']
                   for m in d['meals'] if m.get('meal') == 'breakfast'
                   and m['recipeId'] in lib]
-    ragu_for_breakfast = [n for n in breakfasts
-                          if any(w in n.lower() for w in
-                                 ('ragu', 'curry', 'tray bake', 'braised'))]
+    # Whole words: "asparagus" contains "ragu", and it is a vegetable.
+    import re as _re2
+    dinnerish = {'ragu', 'curry', 'braised', 'tagine', 'stew'}
+    ragu_for_breakfast = [
+        n for n in breakfasts
+        if set(_re2.findall(r'[a-z]+', n.lower())) & dinnerish]
     check('nobody is served ragu for breakfast', not ragu_for_breakfast,
           '; '.join(ragu_for_breakfast[:2]))
 

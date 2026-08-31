@@ -309,6 +309,13 @@ function viewBuild() {
       <div><label for="bServ">Servings each</label><input id="bServ" type="number" value="4" min="1" max="20"></div>
       <div><label for="bKcal">Calories per serving</label><input id="bKcal" type="number" value="600" min="150" max="2000"></div>
       <div><label for="bProt">Protein per serving (g)</label><input id="bProt" type="number" value="40" min="5" max="200"></div>
+      <div><label for="bMealShare">Size it for</label>
+        <select id="bMealShare">
+          <option value="">Whatever I typed above</option>
+          <option value="breakfast">A breakfast (a quarter of the day)</option>
+          <option value="lunch">A lunch (a third)</option>
+          <option value="dinner">A dinner (two fifths)</option>
+        </select></div>
       <div><label for="bCuisine">Theme</label><select id="bCuisine">
         ${(state.cuisines || [{ id: 'any', label: 'No theme' }]).map((c) =>
           `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}
@@ -327,11 +334,130 @@ function viewBuild() {
     </div>
     <p class="muted small" style="margin:8px 0 0">
       <b>Build and price</b> makes a full week and costs it.
-      <b>Offer me choices</b> proposes a few different meals so you can pick.</p>
+      <b>Offer me choices</b> proposes a few different meals so you can pick.
+      <b>Size it for</b> takes your day's numbers below and works out that
+      meal's share of them, since breakfast is not the same size as dinner.</p>
+    ${goalPanel()}
     <div id="bOut" style="margin-top:16px"></div></div>`;
 }
 
+// A day's numbers from a goal and a bodyweight, rather than a figure per meal
+// picked out of the air. Whether the day is split evenly or shaped is left to
+// the person: cooking one dish to eat three times is a real way to eat, and so
+// is a small breakfast and a proper dinner.
+const goal = {
+  profile: 'maintain',
+  weight: 80,
+  even: false,
+  data: null,
+};
+
+function goalPanel() {
+  const list = (goal.data && goal.data.profiles) || [];
+  const chosen = list.find((p) => p.id === goal.profile);
+  const t = chosen && chosen.targets;
+  return `<div class="goal-panel">
+    <div class="row">
+      <div style="flex:2;min-width:180px">
+        <label for="gProfile">What are you eating for?</label>
+        <select id="gProfile">${list.length
+          ? list.map((p) => `<option value="${esc(p.id)}"${
+              p.id === goal.profile ? ' selected' : ''}>${esc(p.label)}</option>`).join('')
+          : '<option>Loading…</option>'}</select>
+      </div>
+      <div style="flex:1;min-width:110px">
+        <label for="gWeight">Your weight (kg)</label>
+        <input id="gWeight" type="number" value="${goal.weight}" min="30" max="250">
+      </div>
+      <div style="flex:1;min-width:150px">
+        <label for="gEven">The day</label>
+        <select id="gEven">
+          <option value=""${goal.even ? '' : ' selected'}>Breakfast smaller than dinner</option>
+          <option value="1"${goal.even ? ' selected' : ''}>Every meal the same size</option>
+        </select>
+      </div>
+    </div>
+    ${t ? `<p class="muted small" style="margin:8px 0 0">${esc(chosen.note)}
+      That is <b>${Math.round(t.ceiling)} kcal</b>, <b>${Math.round(t.floorP)}g
+      protein</b> and <b>${Math.round(t.floorF)}g fibre</b> a day
+      ${goal.even
+        ? `&mdash; ${Math.round(t.ceiling / 3)} kcal a meal across three.`
+        : `&mdash; about ${Math.round(t.ceiling * 0.25)} / ${
+            Math.round(t.ceiling * 0.35)} / ${Math.round(t.ceiling * 0.40)} kcal
+           across breakfast, lunch and dinner.`}
+      <button class="ghost tiny" id="gApply">Use these</button></p>
+      <p class="muted small" style="margin:6px 0 0">Published ranges, not
+        advice. If someone is coaching you, their numbers win.</p>` : ''}
+  </div>`;
+}
+
+// What one meal should be built to. With a sitting chosen it is that sitting's
+// share of the day; otherwise it is whatever was typed, which is what somebody
+// wanting a flat 600 a meal is asking for.
+function mealSizedTargets() {
+  const typed = {
+    kcal_per_serving: Number(($('bKcal') || {}).value) || 600,
+    protein_per_serving: Number(($('bProt') || {}).value) || 40,
+  };
+  const sitting = ($('bMealShare') || {}).value;
+  const chosen = ((goal.data || {}).profiles || [])
+    .find((p) => p.id === goal.profile);
+  if (!sitting || !chosen) return typed;
+  const share = goal.even ? 1 / 3
+    : ({ breakfast: 0.25, lunch: 0.35, dinner: 0.40 })[sitting];
+  return {
+    kcal_per_serving: Math.round(chosen.targets.ceiling * share),
+    protein_per_serving: Math.round(chosen.targets.floorP * share),
+  };
+}
+
+
+async function loadGoals() {
+  try {
+    goal.data = await api('/profiles?weight=' + encodeURIComponent(goal.weight));
+    render();
+  } catch (_) { /* the builder still works with numbers typed in */ }
+}
+
+function wireGoals() {
+  const profile = $('gProfile');
+  if (profile) profile.addEventListener('change', () => {
+    goal.profile = profile.value;
+    render();
+  });
+  const weight = $('gWeight');
+  if (weight) weight.addEventListener('change', () => {
+    goal.weight = Math.max(30, Math.min(250, Number(weight.value) || 80));
+    loadGoals();
+  });
+  const even = $('gEven');
+  if (even) even.addEventListener('change', () => {
+    goal.even = !!even.value;
+    render();
+  });
+  const apply = $('gApply');
+  if (apply) apply.addEventListener('click', () => {
+    const chosen = ((goal.data || {}).profiles || [])
+      .find((p) => p.id === goal.profile);
+    if (!chosen) return;
+    // Write the day's numbers into the plan, so the week planner and the day
+    // bars agree with what the builder is building to.
+    const meta = state.plan.data.meta || (state.plan.data.meta = {});
+    meta.ceiling = chosen.targets.ceiling;
+    meta.floorP = chosen.targets.floorP;
+    meta.floorF = chosen.targets.floorF;
+    meta.evenMeals = goal.even;
+    savePlan().then(() => {
+      toast(`Set to ${Math.round(chosen.targets.ceiling)} kcal and ${
+        Math.round(chosen.targets.floorP)}g protein a day.`);
+      render();
+    }).catch((err) => toast(err.message));
+  });
+}
+
+
 function wireBuild() {
+  wireGoals();
   // Leaving the tab used to lose the whole build. Repaint it instead.
   if (lastBuild) {
     $('bOut').innerHTML = renderBuild(lastBuild);
@@ -350,8 +476,7 @@ function wireBuild() {
         seed: state.plan.name + ':' + Date.now(),
         meals: Number($('bMeals').value),
         servings: Number($('bServ').value),
-        kcal_per_serving: Number($('bKcal').value),
-        protein_per_serving: Number($('bProt').value),
+        ...mealSizedTargets(),
         diet: $('bDiet').value,
         cuisine: ($('bCuisine') || {}).value || 'any',
         meal: ($('bMeal') || {}).value || '',
@@ -656,7 +781,10 @@ function recipeCard(r, opts) {
       <h3 style="flex:1;min-width:0">${esc(r.name)}</h3>${add}
     </div>
     <div class="recipe-tags">${tags}</div>
-    ${recipeStrip(r)}
+    ${r.image ? `<img class="recipe-hero" src="${esc(
+      /^https?:/i.test(r.image) && !/woolworths\.media|coles\.com\.au/.test(r.image)
+        ? remoteImage(r.image) : r.image)}" alt=""
+      onerror="this.remove()">` : recipeStrip(r)}
     <div class="recipe-body">
       ${macroLine(r.perServing, r.servings)}
       <h4>Ingredients</h4>${ing}${steps}${reheat}${notes}
@@ -1066,6 +1194,8 @@ function viewWeek() {
             value="${m.servings || 1}" min="0.1" max="9" step="0.1"
             title="Servings -- tenths are allowed, so a day can land on its
 calorie target instead of stopping short of it">
+          <button class="ghost tiny" data-mealswap="${di}:${mi}"
+            title="Something else that eats about the same">swap</button>
           <button class="ghost tiny" data-rm="${di}:${mi}" title="Remove">&times;</button>
         </div>
         <div class="meal-macros num">
@@ -2340,6 +2470,104 @@ function pickerHtml(dayIndex) {
     </div>`;
 }
 
+// How unlike the meal being replaced a candidate is. Energy and protein are
+// what a day is actually built on, so they carry the weight; fibre matters but
+// is easier to make up elsewhere.
+function mealDistance(a, b) {
+  const x = a.perServing || {};
+  const y = b.perServing || {};
+  return Math.abs((x.kcal || 0) - (y.kcal || 0)) / 100
+    + Math.abs((x.p || 0) - (y.p || 0)) / 8
+    + Math.abs((x.fb || 0) - (y.fb || 0)) / 12;
+}
+
+function openMealSwap(di, mi) {
+  const day = weekData()[di];
+  const line = (day.meals || [])[mi];
+  const current = line && recipeById(line.recipeId);
+  if (!line) return;
+
+  const sitting = line.meal || '';
+  const alike = (state.recipes || [])
+    .filter((r) => r.id !== line.recipeId)
+    .filter((r) => !sitting || weekSuits(r, sitting))
+    .map((r) => ({ r, d: current ? mealDistance(current, r) : 0 }))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 24);
+
+  const host = document.createElement('div');
+  host.id = 'mealSwapHost';
+  const per = (current && current.perServing) || {};
+  host.innerHTML = `<div class="sheet-back" id="msBack"></div>
+    <div class="sheet" role="dialog" aria-label="Swap this meal">
+      <div class="sheet-top">
+        <div style="flex:1;min-width:0">
+          <h3 style="margin:0">Instead of ${esc(
+            current ? current.name : 'this meal')}</h3>
+          <p class="muted small" style="margin:3px 0 0">${
+            Math.round(per.kcal || 0)} kcal &middot; ${
+            Math.round(per.p || 0)}g protein &middot; ${
+            Math.round(per.fb || 0)}g fibre${sitting ? ` &middot; ${esc(sitting)}` : ''}
+            &mdash; closest first.</p>
+        </div>
+        <button class="ghost" id="msClose">Close</button>
+      </div>
+      <div class="sheet-body">
+        ${alike.length ? `<div class="pick-list">${alike.map(({ r }) => {
+          const p = r.perServing || {};
+          const dk = Math.round((p.kcal || 0) - (per.kcal || 0));
+          const dp = Math.round((p.p || 0) - (per.p || 0));
+          const df = Math.round((p.fb || 0) - (per.fb || 0));
+          // "same kcal same g P same g F" is three ways of saying one thing.
+          const shift = (n, unit) => n === 0 ? ''
+            : `<span class="${n > 0 ? 'up' : 'down'}">${n > 0 ? '+' : ''}${n}${unit}</span>`;
+          const deltas = [shift(dk, ' kcal'), shift(dp, 'g P'), shift(df, 'g F')]
+            .filter(Boolean).join(' ') || '<span class="muted">much the same</span>';
+          return `<button class="pick" data-msTake="${r.id}">
+            <span class="dot cat-${esc(categoryOf(r))}"></span>
+            <span class="pick-body">
+              <b>${esc(r.name)}</b>
+              <span class="muted small">${Math.round(p.kcal || 0)} kcal &middot;
+                ${Math.round(p.p || 0)}g protein &middot;
+                ${Math.round(p.fb || 0)}g fibre</span>
+            </span>
+            <span class="pick-meta small num">${deltas}</span>
+          </button>`;
+        }).join('')}</div>`
+        : `<p class="muted">Nothing else in your library suits ${
+            sitting ? esc(sitting) : 'this meal'}. Save a few more from the
+            recipe book.</p>`}
+      </div>
+    </div>`;
+  document.body.appendChild(host);
+
+  const shut = () => host.remove();
+  $('msBack').addEventListener('click', shut);
+  $('msClose').addEventListener('click', shut);
+  host.querySelectorAll('[data-mstake]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      weekData()[di].meals[mi].recipeId = Number(b.dataset.mstake);
+      auto.result = null;
+      shut();
+      try {
+        await savePlan();
+      } catch (err) {
+        toast(err.message);
+      }
+      render();
+    });
+  });
+}
+
+// The same rule the planner uses, so the sitting a dish belongs to means the
+// same thing on both sides.
+function weekSuits(r, sitting) {
+  if (!sitting) return true;
+  const listed = r.meals || (r.meal ? [r.meal] : null);
+  return (listed || ['lunch', 'dinner']).includes(sitting);
+}
+
+
 function openPicker(dayIndex) {
   week.picker = dayIndex;
   const host = document.createElement('div');
@@ -2426,6 +2654,13 @@ function wireWeek() {
   saveGoal('gCeiling', 'ceiling');
   saveGoal('gFloorP', 'floorP');
   saveGoal('gFloorF', 'floorF');
+
+  document.querySelectorAll('[data-mealswap]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const [di, mi] = b.dataset.mealswap.split(':').map(Number);
+      openMealSwap(di, mi);
+    });
+  });
 
   document.querySelectorAll('[data-rm]').forEach((b) => {
     b.addEventListener('click', async () => {
@@ -2750,6 +2985,15 @@ function viewFind() {
   </div>`;
 }
 
+// A recipe's photograph lives on the site it came from, and the content
+// security policy allows no such host. The server fetches it instead, which
+// keeps the policy tight and means the recipe site is not told your address.
+function remoteImage(url) {
+  if (!url) return '';
+  return '/api/image?url=' + encodeURIComponent(url);
+}
+
+
 function renderFound() {
   const r = found.recipe;
   const times = [
@@ -2760,8 +3004,8 @@ function renderFound() {
 
   return `<div class="card" style="margin:0">
     <div class="row" style="align-items:flex-start">
-      ${r.image ? `<img class="thumb" style="width:78px;height:78px"
-        src="${esc(r.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
+      ${r.image ? `<img class="thumb" style="width:110px;height:110px"
+        src="${esc(remoteImage(r.image))}" alt="" onerror="this.remove()">` : ''}
       <div style="flex:1;min-width:0">
         <h3 style="margin:0">${esc(r.name)}</h3>
         <p class="muted small" style="margin:3px 0 0">
@@ -3655,6 +3899,11 @@ function autoPanel() {
         </select></div>
       <div><label for="aDiet">Diet</label>
         <select id="aDiet">${optionsFor(DIETS, 'any')}</select></div>
+      <div><label for="aEven">The day</label>
+        <select id="aEven">
+          <option value=""${goal.even ? '' : ' selected'}>Breakfast smaller than dinner</option>
+          <option value="1"${goal.even ? ' selected' : ''}>Every meal the same size</option>
+        </select></div>
     </div>
     <div class="row" style="margin-top:14px">
       <button id="aGo" class="primary" ${auto.busy ? 'disabled' : ''}>${
@@ -3743,6 +3992,7 @@ function wireAuto() {
         cuisine: ($('aCuisine') || {}).value || 'any',
         diet: ($('aDiet') || {}).value || 'any',
         budget: Number($('aBudget').value) || null,
+        even_meals: !!($('aEven') || {}).value,
         apply: true,
       };
       auto.result = await api('/plans/' + state.planId + '/autoplan',
@@ -4180,6 +4430,7 @@ async function boot() {
   await loadPlan();
   await loadRecipes();
   loadFoodImages();      // deliberately not awaited -- the page is usable now
+  loadGoals();
   api('/auto-price').then((a) => { state.autoPrice = a; }).catch(() => {});
   try {
     state.cuisines = (await api('/cuisines')).cuisines;
