@@ -2006,3 +2006,39 @@ human, and where are they when they open this" is a different question from
 "is this accessible", and it gives a different answer: not a general
 concession to accessibility, but the specific fact that this app is used in an
 aisle with one hand.
+
+### The signature: the shelf-edge ticket
+
+Those seven were craft. The skill also asks for a **signature** — one element
+that could only exist for this product — and that is a direction, not a fix.
+
+Every Australian supermarket puts the same object under every product: dollars
+large, cents raised beside them, the unit price in small print underneath, and
+the whole card red with the old price beside it when the thing is on special.
+A shopping row already holds exactly those facts. It was rendering them as a
+price cell, a per-kilo cell and a grey tag.
+
+So the ticket now carries every price in the app: the shopping list, the price
+history, the catalogue search, the swap sheet and the barcode scanner. Five
+screens, one object, and the specials genuinely findable by glance — a red card
+in a wall of white ones, which no amount of tuning an "on special" tag was
+going to achieve.
+
+Because the ticket says the price, the unit and whether it moved, everything
+that had been saying those alongside it came out: a Per kg column, a Pack
+column, a red SPECIAL tag, a struck-through was-price, a tinted table row, and
+the pack size repeated in a sub-line under product names that already end with
+it. That is one fact per place, which is the whole of the change.
+
+Two things fell out of doing it:
+
+* Five CSS rules were left styling classes no code produced any more. Nothing
+  failed — the stylesheet just quietly carried a dead design. `test_stylesheet`
+  now fails on a rule nothing emits, and was checked against that exact bug.
+* The swap sheet was offering a "Bananas in Pyjamas Large Classic Soft Toy
+  Plush" as a substitute for bananas. Live search had dropped marketplace
+  merchandise for a while, but rows indexed before departments were recorded
+  carry no department to judge, and the swap sheet reads those directly. It is
+  filtered on the way out now, and the marketplace is recorded by name so
+  "sold through the marketplace" stays distinguishable from "not recorded
+  yet".

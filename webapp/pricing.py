@@ -379,6 +379,7 @@ def candidates_for(session: Session, food: str, query: str,
     for term in terms:
         products = catalogue_search(
             session, query=term, store=store, limit=limit).get("products") or []
+        products = [p for p in products if is_edible(p)]
         if products:
             break
 
@@ -390,6 +391,22 @@ def candidates_for(session: Session, food: str, query: str,
         if fresh:
             products = fresh
     return products
+
+
+def is_edible(product: Dict[str, Any]) -> bool:
+    """Keep merchandise out of anything offering products as food.
+
+    Woolworths sells books, kitchenware and soft toys through the same search
+    as its groceries, under an "Everyday Market" that files nothing under a
+    trading department. The live catalogue drops those on the way in, but rows
+    indexed before departments were recorded have no department to judge, so
+    those fall back to the name -- which is how a "Bananas in Pyjamas ... Soft
+    Toy Plush" came to be offered as a substitute for bananas.
+    """
+    department = (product.get("department") or "").upper()
+    if department in woolworths_catalog._NON_FOOD_DEPARTMENTS:
+        return False
+    return not woolworths_catalog.looks_like_merchandise(product.get("name") or "")
 
 
 def pinned_product(session: Session,

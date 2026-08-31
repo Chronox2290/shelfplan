@@ -1390,6 +1390,55 @@ function gotSet() {
 // What to actually pick up. A cauliflower does not come in a one-kilogram
 // pack, so "2 packs, 1000g each" is a costing unit printed as a shopping
 // instruction. For anything sold by weight or by the each, say the weight.
+// Supermarket product names end in their own pack size -- "Greek Style Yoghurt
+// 2kg", "Bananas Kids 5 pack" -- and the ticket beside them says the unit. So
+// the separate size line is usually the same fact a third time. Show it only
+// when it adds something: not when the name already ends with it, and not when
+// it is the bare unit the ticket is about to say anyway.
+function packNote(product) {
+  const size = (product.package_size || '').trim();
+  if (!size) return '';
+  const flat = size.toLowerCase().replace(/\s+/g, '');
+  if (flat === 'each' || flat === 'ea' || flat === 'per each') return '';
+  const name = (product.name || '').toLowerCase().replace(/\s+/g, '');
+  return name.endsWith(flat) ? '' : size;
+}
+
+
+// A store product and a stored price reading spell the same three facts with
+// different keys. The ticket only wants the three.
+function ticketFrom(product) {
+  if (!product) return null;
+  return {
+    price: product.pack_price != null ? product.pack_price : product.price,
+    wasPrice: product.was_price != null ? product.was_price : product.wasPrice,
+    onSpecial: product.on_special != null ? product.on_special : product.onSpecial,
+  };
+}
+
+
+// The price as the shelf writes it: dollars large, cents raised beside them,
+// the unit price in small print underneath, and the whole card red when it has
+// moved. Everything a ticket says, in the order it says it.
+function shelfTicket(price, perKg) {
+  if (!price || !price.price) {
+    return `<span class="ticket empty"><span class="ticket-price">&mdash;</span>
+      <span class="ticket-unit">no price yet</span></span>`;
+  }
+  const was = price.wasPrice && price.wasPrice > price.price ? price.wasPrice : null;
+  const special = !!(price.onSpecial || was);
+  const [dollars, cents] = Number(price.price).toFixed(2).split('.');
+
+  return `<span class="ticket${special ? ' special' : ''}">
+    ${special ? '<span class="ticket-flag">SPECIAL</span>' : ''}
+    <span class="ticket-price"><span class="ticket-sign">$</span>${dollars}<span
+      class="ticket-cents">${cents}</span></span>
+    <span class="ticket-unit">${perKg ? money(perKg) + ' per kg' : 'each'}${
+      was ? ` &middot; was ${money(was)}` : ''}</span>
+  </span>`;
+}
+
+
 function howMuch(food, meta, price) {
   const grams = Math.round(meta.grams || 0);
   if (!grams) return '';
@@ -1467,20 +1516,17 @@ function viewShop() {
               p && p.matched ? ' &middot; ' + esc(p.matched) : ''}${link}</div>
             </div></div></td>
 
-          <td class="r num" data-label="Price">${p && p.price
-            ? money(p.price)
-            : '<span class="muted small">no price yet</span>'}
+          <td class="r" data-label="Price">${shelfTicket(p, kg)}
             <button class="ghost tiny" data-edit="${esc(food)}"
               title="${p && p.price ? 'Correct this price' : 'Enter a price'}">${
               p && p.price ? 'edit' : 'set'}</button></td>
-          <td class="r num muted" data-label="Per kg">${kg ? money(kg) + '/kg' : '&mdash;'}</td>
           <td class="r muted small" data-label="Store">${esc((p && p.store) || '')}
             <button class="ghost tiny" data-swap="${esc(food)}"
               title="Choose a different product for this line">swap</button>
             <button class="ghost tiny" data-drop="${esc(food)}" title="Remove from list">&times;</button></td>
         </tr>`;
       }).join('');
-      return `<tr class="aisle-row"><td colspan="4" class="aisle">${esc(aisle)}</td></tr>` + rows;
+      return `<tr class="aisle-row"><td colspan="3" class="aisle">${esc(aisle)}</td></tr>` + rows;
     }).join('');
 
   return `<div class="card">
@@ -1501,7 +1547,7 @@ function viewShop() {
     <div id="refreshOut"></div>
     <div class="scroll"><table>
       <thead><tr><th>Item</th><th class="r">Price</th>
-        <th class="r">Per kg</th><th class="r">Store</th></tr></thead>
+        <th class="r">Store</th></tr></thead>
       <tbody>${sections}</tbody></table></div></div>
     ${savedListsPanel()}`;
 }
@@ -1870,17 +1916,16 @@ the catalogue has not seen">Search the store</button>
 }
 
 function swapRow(p, i) {
-  const perKg = p.per_kg ? `${money(p.per_kg)}/kg` : '';
+  // The pack size and the flags; the ticket beside it carries the price, the
+  // per-kilo and whether it has moved, so none of those are said twice.
   return `<button class="pick" data-take="${i}">
     ${thumb(p)}
     <span class="pick-body">
-      <b>${esc(p.name)}</b>${p.on_special
-        ? ' <span class="tag deal">SPECIAL</span>' : ''}
-      <span class="muted small">${esc(p.package_size || '')}${
-        perKg ? ' &middot; ' + perKg : ''}${
-        (p.flags || []).length ? ' &middot; ' + esc(p.flags.join(', ')) : ''}</span>
+      <b>${esc(p.name)}</b>
+      <span class="muted small">${[packNote(p), ...(p.flags || [])]
+        .filter(Boolean).map(esc).join(' &middot; ')}</span>
     </span>
-    <span class="pick-meta num"><b>${money(p.pack_price)}</b></span>
+    <span class="pick-meta">${shelfTicket(ticketFrom(p), p.per_kg)}</span>
   </button>`;
 }
 
@@ -1995,9 +2040,7 @@ function viewPrices() {
       <td><b>${esc(r.food)}</b>
         <div class="muted small">${esc(r.last.matched || r.last.store || '')}
           ${r.last.source === 'manual' ? '<span class="tag">by hand</span>' : ''}</div></td>
-      <td class="r num" data-label="Now">${r.now ? money(r.now) + '/kg' : '&mdash;'}
-        ${r.last.wasPrice && r.last.price && r.last.wasPrice > r.last.price
-          ? `<div class="was num">was ${money(r.last.wasPrice)}</div>` : ''}</td>
+      <td class="r" data-label="Now">${shelfTicket(r.last, r.now)}</td>
       ${deltaCell(r.now, r.before)}
       <td class="spark-cell">${sparkline(r.points)}</td>
       <td data-label="Verdict"><span class="tag ${r.verdict.cls}">${
@@ -2333,8 +2376,7 @@ function thumb(p) {
     data-fail-mark="${esc(mark)}">`;
 }
 
-function resultRows(items, opts) {
-  const showAge = opts && opts.showAge;
+function resultRows(items) {
   return items.map((p, i) => {
     const key = `${p.store}:${p.stockcode}`;
     const link = p.url
@@ -2342,34 +2384,17 @@ function resultRows(items, opts) {
       : '';
     return `<tr>
       <td class="prod"><div class="prod-row">${thumb(p)}<div>
-        <b>${esc(p.name)}</b>${p.on_special ? ' <span class="tag deal">SPECIAL</span>' : ''}
-        ${p.in_stock === false ? ' <span class="tag stop">out of stock</span>' : ''}${link}
-        <div class="muted small">${esc(p.package_size || '')}${
-          p.cup_string ? ' &middot; ' + esc(p.cup_string) : ''}</div></div></div></td>
+        <b>${esc(p.name)}</b>${
+          p.in_stock === false ? ' <span class="tag stop">out of stock</span>' : ''}${link}
+        <div class="muted small">${esc(packNote(p))}</div></div></div></td>
       <td data-label="Store"><span class="tag">${esc(p.store)}</span></td>
-      <td class="r num" data-label="Pack">${p.pack_g ? p.pack_g + ' g' : '&mdash;'}</td>
-      <td class="r num" data-label="Price">${priceCell(p)}</td>
-      <td class="r num" data-label="Per kg">${p.per_kg ? money(p.per_kg) : '&mdash;'}</td>
+      <td class="r" data-label="Price">${
+        shelfTicket(ticketFrom(p), p.per_kg)}</td>
       <td class="r"><button class="tiny" data-add-prod="${esc(key)}"
         data-idx="${i}">Add to list</button></td>
     </tr>`;
   }).join('');
 }
-
-// A price that is down deserves to look down. "on special" as a word among
-// other words is the easiest thing on a row to miss, and the whole reason for
-// looking at a price list is to catch the ones that have moved.
-function priceCell(p) {
-  const now = money(p.pack_price);
-  if (!p.on_special && !p.was_price) return now;
-  const was = p.was_price && p.pack_price && p.was_price > p.pack_price
-    ? p.was_price : null;
-  const off = was ? Math.round((was - p.pack_price) / was * 100) : null;
-  return `<span class="deal-price">${now}</span>
-    ${was ? `<div class="was num">${money(was)}</div>` : ''}
-    ${off ? `<div class="off num">${off}% off</div>` : ''}`;
-}
-
 
 function resultTable(items, note) {
   if (!items.length) {
@@ -2377,8 +2402,7 @@ function resultTable(items, note) {
   }
   return `${note ? `<div class="row" style="margin-bottom:10px">${note}</div>` : ''}
     <div class="scroll"><table><thead><tr>
-      <th>Product</th><th>Store</th><th class="r">Pack</th>
-      <th class="r">Price</th><th class="r">Per kg</th><th></th>
+      <th>Product</th><th>Store</th><th class="r">Price</th><th></th>
     </tr></thead><tbody>${resultRows(items)}</tbody></table></div>`;
 }
 
@@ -3604,9 +3628,7 @@ function renderScan(res) {
   const image = (p && p.image) || (n && n.image) || '';
 
   const price = p && p.pack_price
-    ? `<div class="row" style="gap:14px"><b class="num">${money(p.pack_price)}</b>
-        ${p.per_kg ? `<span class="muted num">${money(p.per_kg)}/kg</span>` : ''}
-        ${p.on_special ? '<span class="tag ok">special</span>' : ''}</div>`
+    ? `<div class="row">${shelfTicket(ticketFrom(p), p.per_kg)}</div>`
     : '<p class="muted small" style="margin:0">No price found at Woolworths.</p>';
 
   const nutrition = macros ? `<div class="macros num" style="margin-top:10px">

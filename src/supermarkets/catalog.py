@@ -96,23 +96,56 @@ def parse_unit_price_per_kg(product: Dict[str, Any]) -> Optional[float]:
     return cup * 1000.0 / grams
 
 
+# What the department is called when the product has none of its own.
+MARKETPLACE = "EVERYDAY MARKET"
+
 # Woolworths files every grocery line under a trading department. What has no
 # department is its "Everyday Market" -- a third-party marketplace selling
 # books, kitchenware and garden supplies through the same search. That is where
 # a search for zucchini returns a cookbook called "Artichoke to Zucchini" and a
 # search for mushrooms returns an acrylic ornament. Neither is an ingredient.
-_NON_FOOD_DEPARTMENTS = {"GENERAL MERCHANDISE"}
+_NON_FOOD_DEPARTMENTS = {"GENERAL MERCHANDISE", MARKETPLACE}
+
+# For the rows already in a catalogue from before departments were recorded,
+# where the department is simply unknown. Nothing sold as food is described as
+# a plush toy or a jigsaw, so these are safe to read as merchandise on the name
+# alone -- and they are the ones that actually turned up: a "Bananas in
+# Pyjamas ... Soft Toy Plush" offered as a substitute for bananas.
+_MERCHANDISE = (
+    "soft toy", "plush", "jigsaw", "puzzle", "cookbook", "recipe book",
+    "ornament", "figurine", "greeting card", "gift card", "photo frame",
+    "tea towel", "colouring book", "drink bottle", "lunch box",
+)
 
 
 def department_of(product: Dict[str, Any]) -> str:
+    """The trading department, or `MARKETPLACE` when the product has none.
+
+    Returning the sentinel rather than an empty string is the point. Once this
+    is stored, "sold through the third-party marketplace" stays distinguishable
+    from "indexed before we recorded departments" -- and only the first is safe
+    to throw away.
+    """
     extra = product.get("AdditionalAttributes") or {}
-    return (extra.get("sapdepartmentname") or "").strip().upper()
+    return (extra.get("sapdepartmentname") or "").strip().upper() or MARKETPLACE
 
 
 def is_grocery(product: Dict[str, Any]) -> bool:
     """Is this something you could put in a meal, rather than merchandise?"""
-    department = department_of(product)
-    return bool(department) and department not in _NON_FOOD_DEPARTMENTS
+    if department_of(product) in _NON_FOOD_DEPARTMENTS:
+        return False
+    return not looks_like_merchandise(product.get("Name") or "")
+
+
+def looks_like_merchandise(name: str) -> bool:
+    """Merchandise judged on its name, for rows with no department recorded.
+
+    Whole words only. "Plush" has to be the word, not a fragment of one, or a
+    perfectly good ingredient goes missing because of the letters inside it.
+    """
+    words = "".join(c if c.isalnum() else " " for c in (name or "").lower())
+    padded = " " + " ".join(words.split()) + " "
+    return any(" " + term + " " in padded for term in _MERCHANDISE)
 
 
 def normalise(product: Dict[str, Any]) -> Dict[str, Any]:

@@ -15,7 +15,7 @@ import io  # noqa: E402
 
 from webapp import autoprice, pricing  # noqa: E402
 from webapp.db import SessionLocal, init_db  # noqa: E402
-from src.supermarkets import resolve  # noqa: E402
+from src.supermarkets import catalog, resolve  # noqa: E402
 
 fails = []
 
@@ -112,6 +112,37 @@ with SessionLocal() as session:
     check("and is flagged for review without being called a mismatch",
           found.get("needs_review") and not found.get("mismatch"),
           str(found.get("review_reasons")))
+
+# Woolworths sells soft toys, cookbooks and ornaments through the same search
+# as its groceries, filed under an "Everyday Market" with no trading
+# department. Live search has dropped those for a while; what had not been
+# noticed is that rows indexed *before* departments were recorded carry no
+# department to judge, so the swap sheet was still offering a "Bananas in
+# Pyjamas ... Soft Toy Plush" as a substitute for bananas.
+for name, department, edible in [
+    ("Bananas in Pyjamas Large Classic Soft Toy Plush 45cm Set of 2", "", False),
+    ("Artichoke to Zucchini Cookbook", "", False),
+    ("Mushroom Acrylic Ornament", "", False),
+    ("Anything at all", "EVERYDAY MARKET", False),
+    ("Anything at all", "GENERAL MERCHANDISE", False),
+    ("Cavendish Bananas each", "FRUIT AND VEG", True),
+    ("Woolworths Broccoli", "", True),
+    # Whole words only, or an ingredient disappears for the letters inside it.
+    ("Plushenko Greek Yoghurt", "DAIRY", True),
+]:
+    check(f"{name[:38]!r} is {'food' if edible else 'merchandise'}",
+          pricing.is_edible({"name": name, "department": department}) == edible)
+
+# A product with no department at all must record that it came from the
+# marketplace, not leave the field blank -- blank is indistinguishable from
+# "indexed before we stored departments", and only one of those is safe to bin.
+check("a product with no department is marked as marketplace",
+      catalog.department_of({}) == catalog.MARKETPLACE,
+      catalog.department_of({}))
+check("and a real department survives untouched",
+      catalog.department_of(
+          {"AdditionalAttributes": {"sapdepartmentname": "Fruit and Veg"}})
+      == "FRUIT AND VEG")
 
 print()
 print("FAILED: " + ", ".join(fails) if fails else "all checks passed")

@@ -96,6 +96,34 @@ changes, and proportional digits make a column twitch as it updates.
 Under 200ms for anything routine. `scale(.97)` on `:active` so a tap answers.
 Everything drops under `prefers-reduced-motion`.
 
+## The signature
+
+The shelf-edge ticket. Every Australian supermarket puts the same object under
+every product: the price with the dollars large and the cents raised beside
+them, the unit price in small print underneath, and the whole card red with the
+old price beside it when the thing is on special.
+
+A shopping row already contains exactly those three facts, and used to render
+them as a price cell, a per-kilo cell and a grey tag — the generic answer for
+tabular data, which says nothing about where you are standing when you read it.
+
+It is the one element here that could not belong to another product, so it is
+used everywhere a price appears and nowhere it does not: the shopping list, the
+price history, the catalogue search, the swap sheet, the barcode scanner. Five
+screens, one object.
+
+Rules that come with it:
+
+* **The ticket owns the price, the unit and whether it moved.** Wherever it
+  appears, nothing else on the row says any of those again. This retired a
+  Per kg column, a Pack column, a red SPECIAL tag, a struck-through was-price
+  and a tinted table row — all of them the ticket's job, done twice.
+* **Red stays the specials colour and only that.** The ticket is the one thing
+  in the app allowed to use it, which is what makes a moved price findable by
+  glance in a wall of white cards.
+* **It does not out-shout the product name.** In an aisle you find the thing
+  first and read its ticket second, so the name keeps the row.
+
 ## Hierarchy
 
 One focal element per view, and it wins on weight and colour before size:
@@ -123,7 +151,11 @@ is the aisle.
 * `.tag` — `--r-pill` · 5px 11px · 12px. Meal-of-day tags use `.when`, never
   `.meal`, which is already a shopping row.
 * Shopping row — thumbnail · name (17.5px/600) · quantity and matched product
-  beneath · price · per kg · store · swap/remove.
+  beneath · shelf ticket · store · swap/remove.
+* Product row anywhere else — thumbnail · name · pack size *only when the name
+  does not already end with it* · shelf ticket. Supermarket names carry their
+  own size ("Greek Style Yoghurt 2kg"), so repeating it is the same fact three
+  deep once the ticket is counted.
 * A missing photograph falls back to a glyph for the kind of food, never a
   letter. Handled by one capture-phase listener, never an inline `onerror`.
 
@@ -133,6 +165,13 @@ is the aisle.
   the image silently never loads.
 * Every colour comes from a token defined on bare `:root`, so all three theme
   states resolve.
-* `scripts/test_stylesheet.py` guards the brace balance and that every rule the
-  page depends on is reachable at the top level. An unclosed `@media` once
-  swallowed sixty rules in silence.
+* `scripts/test_stylesheet.py` guards the brace balance, that every rule the
+  page depends on is reachable at the top level, and that no rule survives
+  whose markup has gone. An unclosed `@media` once swallowed sixty rules in
+  silence; later, the ticket replaced the old red-tag treatment and left five
+  rules behind still styling classes no code produced.
+* Merchandise is not food. Woolworths sells soft toys and cookbooks through the
+  same search as its groceries, filed under a marketplace with no trading
+  department — `pricing.is_edible` keeps them out of anything that offers a
+  product as an ingredient, and `catalog.department_of` records the marketplace
+  by name so "no department" stays distinguishable from "not recorded yet".
