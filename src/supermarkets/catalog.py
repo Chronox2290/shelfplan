@@ -96,6 +96,25 @@ def parse_unit_price_per_kg(product: Dict[str, Any]) -> Optional[float]:
     return cup * 1000.0 / grams
 
 
+# Woolworths files every grocery line under a trading department. What has no
+# department is its "Everyday Market" -- a third-party marketplace selling
+# books, kitchenware and garden supplies through the same search. That is where
+# a search for zucchini returns a cookbook called "Artichoke to Zucchini" and a
+# search for mushrooms returns an acrylic ornament. Neither is an ingredient.
+_NON_FOOD_DEPARTMENTS = {"GENERAL MERCHANDISE"}
+
+
+def department_of(product: Dict[str, Any]) -> str:
+    extra = product.get("AdditionalAttributes") or {}
+    return (extra.get("sapdepartmentname") or "").strip().upper()
+
+
+def is_grocery(product: Dict[str, Any]) -> bool:
+    """Is this something you could put in a meal, rather than merchandise?"""
+    department = department_of(product)
+    return bool(department) and department not in _NON_FOOD_DEPARTMENTS
+
+
 def normalise(product: Dict[str, Any]) -> Dict[str, Any]:
     """Flatten one raw API product into the fields a meal plan needs."""
     pack_g = parse_pack_grams(product)
@@ -146,6 +165,7 @@ def normalise(product: Dict[str, Any]) -> Dict[str, Any]:
             if product.get("Stockcode")
             else ""
         ),
+        "department": department_of(product),
         "store": STORE_NAME,
     }
 
@@ -226,7 +246,8 @@ def search(query: str, limit: int = 10, page: int = 1) -> Dict[str, Any]:
     except ValueError as exc:
         return {"status": "error", "query": query, "message": str(exc), "products": []}
 
-    products = [normalise(p) for p in _iter_raw_products(payload)]
+    raw = [p for p in _iter_raw_products(payload) if is_grocery(p)]
+    products = [normalise(p) for p in raw]
     products = [p for p in products if p["name"]][:limit]
     return {
         "status": "success",

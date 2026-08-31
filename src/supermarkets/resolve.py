@@ -11,6 +11,7 @@ Two things make a naive "take the first search hit" wrong for meal planning:
 """
 
 from typing import Any, Dict, List, Optional
+import functools
 import re
 
 from . import catalog
@@ -24,6 +25,23 @@ _STOPWORDS = {
     "the", "and", "with", "of", "a", "each", "loose", "pack", "tin",
     "g", "kg", "ml", "l",
 }
+
+# Words that say who made it or how it was farmed, not what it is. They can
+# neither confirm nor contradict a match, but left in they wreck the arithmetic
+# in one direction only: "Woolworths RSPCA Approved Chicken Breast Fillet" is
+# three words of blurb and three words of food, so measuring how much of the
+# name is on-topic scored it below a 80g packet of sliced deli chicken.
+_NOISE = frozenset("""
+woolworths coles macro essentials homebrand select signature community
+rspca approved free range organic australian australia aussie farm farms
+grown premium finest classic original everyday value brand co foods
+company gourmet deli style traditional authentic quality
+""".split())
+
+# A pack size is not a describing word. "1kg" and "500g" survived tokenising as
+# ordinary words -- they are not bare digits -- so every product that states its
+# size looked that bit less like what was asked for.
+_MEASURE = re.compile(r"^\d+(?:\.\d+)?(?:g|kg|mg|ml|l|kj|cal|pk|pack)$")
 
 # Qualifier groups whose members are mutually exclusive. Wanting one member and
 # being offered another is disqualifying, not merely a weaker match: brown rice
@@ -51,10 +69,20 @@ def _singular(word: str) -> str:
     return word
 
 
+def _token_sequence(text: str) -> List[str]:
+    """The same words as _tokens, kept in the order the label reads."""
+    return [
+        _singular(w) for w in re.findall(r"[a-z0-9]+", (text or "").lower())
+        if w not in _STOPWORDS and w not in _NOISE
+        and not w.isdigit() and not _MEASURE.match(w)
+    ]
+
+
 def _tokens(text: str) -> set:
     return {
         _singular(w) for w in re.findall(r"[a-z0-9]+", (text or "").lower())
-        if w not in _STOPWORDS and not w.isdigit()
+        if w not in _STOPWORDS and w not in _NOISE
+        and not w.isdigit() and not _MEASURE.match(w)
     }
 
 
@@ -67,6 +95,7 @@ _FORM_WORDS = frozenset("""
 relish chutney sauce paste pickle pickled dip juice powder seasoning
 spice stock soup crisp chip jerky marinade dressing jam spread flavoured
 flavour extract essence syrup cordial pesto salsa hummus dukkah rub
+chargrilled grilled antipasto sundried semidried confit
 """.split())
 
 
@@ -77,6 +106,41 @@ def form_penalty(wanted: str, candidate: str) -> float:
     if want & _FORM_WORDS:
         return 0.0            # a relish was actually asked for
     return 1.0 if (have & _FORM_WORDS) else 0.0
+
+
+# Cuts and treatments that make a product a *processed* version of the thing
+# asked for. Unlike the groups above these bite one-sidedly: a plan line saying
+# "chicken breast" and a shelf saying "chicken breast schnitzel" do not
+# contradict each other, they simply are not the same shopping decision.
+# "Fillet" is deliberately absent -- a breast fillet is the plain form.
+_PROCESSED = frozenset("""
+diced mince minced strip sliced shredded crumbed schnitzel nugget kiev
+skewer marinated seasoned stuffed burger patty sausage rissole meatball
+""".split())
+
+
+def processed_penalty(wanted: str, candidate: str) -> float:
+    """Candidate names a cut or treatment the request did not ask for."""
+    want = _tokens(wanted)
+    if want & _PROCESSED:
+        return 0.0            # the cut was asked for by name
+    return 1.0 if (_tokens(candidate) & _PROCESSED) else 0.0
+
+
+_JOINED = re.compile(r"\s(?:&|and)\s", re.I)
+
+
+def mixture_penalty(wanted: str, candidate: str) -> float:
+    """Candidate joins two foods where the plan named one.
+
+    "Kale & Baby Spinach" and "Carrot, Cauliflower & Broccoli" are mixes. The
+    conjunction is the whole signal and it is invisible to token overlap --
+    "and" is a stopword, so a bag of four vegetables reads as a slightly wordy
+    bag of one of them.
+    """
+    if _JOINED.search(wanted or ""):
+        return 0.0               # the plan asked for a mix
+    return 1.0 if _JOINED.search(candidate or "") else 0.0
 
 
 def conflict_penalty(wanted: str, candidate: str) -> float:
@@ -95,24 +159,51 @@ def conflict_penalty(wanted: str, candidate: str) -> float:
     return float(clashes)
 
 
-def name_similarity(wanted: str, candidate: str) -> float:
-    """How well a candidate name matches, both ways round.
+# An unmatched word before the food is worth this much of one after it.
+_LEADING_COST = 0.35
 
-    Counting only how many wanted words appear (recall) makes "Broccoli" and
-    "Frozen Carrot Cauliflower & Broccoli" score identically, because extra
-    words cost nothing -- and then pack size decides, which is how a bag of
-    mixed vegetables wins a search for broccoli. Words in the candidate that
-    were not asked for have to count against it, so this is the harmonic mean
-    of both directions: everything asked for is present, and little else is.
+
+def name_similarity(wanted: str, candidate: str) -> float:
+    """How well a candidate name matches, both ways round and in order.
+
+    Counting only how many wanted words appear makes "Broccoli" and "Frozen
+    Carrot Cauliflower & Broccoli" score identically, because extra words cost
+    nothing -- and then pack size decides, which is how a bag of mixed
+    vegetables wins a search for broccoli. So words in the candidate that were
+    not asked for have to count against it.
+
+    But they do not all count the same, because supermarket names are not a bag
+    of words -- they read brand first, food, then what was done to it:
+
+        Woolworths RSPCA Approved | Chicken Breast | Fillet
+        La Gina | Polenta | Corn Meal
+
+    Everything before the food says who made it. Everything after modifies it,
+    and that is where a different product hides: corn meal is a kind of
+    polenta, sliced is a kind of chicken breast. Charging full price for
+    trailing words and a third for leading ones is what separates plain polenta
+    from polenta corn meal without also throwing away every store brand whose
+    name happens to be long.
     """
-    a, b = _tokens(wanted), _tokens(candidate)
-    if not a or not b:
+    a = _tokens(wanted)
+    seq = _token_sequence(candidate)
+    if not a or not seq:
         return 0.0
-    overlap = len(a & b)
-    if not overlap:
+
+    hits = [i for i, word in enumerate(seq) if word in a]
+    if not hits:
         return 0.0
+    overlap = len({seq[i] for i in hits})
+    first = hits[0]
+
+    # Words between two matches read as modifiers too -- "chicken breast
+    # crumbed fillet" is not plain chicken breast -- so only what sits ahead of
+    # the first match is discounted.
+    spare = sum(_LEADING_COST if i < first else 1.0
+                for i, word in enumerate(seq) if word not in a)
+
     recall = overlap / len(a)
-    precision = overlap / len(b)
+    precision = overlap / (overlap + spare)
     return 2 * recall * precision / (recall + precision)
 
 
@@ -122,6 +213,17 @@ def pack_closeness(target_g: Optional[float], pack_g: Optional[float]) -> float:
         return 0.0
     ratio = max(target_g, pack_g) / min(target_g, pack_g)
     return 1.0 / ratio
+
+
+def pack_term(target_g: Optional[float], pack_g: Optional[float]) -> float:
+    """Signed: a pack near the plan's helps, one wildly off it hurts.
+
+    Unknown on either side is neutral rather than bad -- loose vegetables are
+    sold by the each and have no pack to be close to.
+    """
+    if not target_g or not pack_g:
+        return 0.0
+    return pack_closeness(target_g, pack_g) - 0.5
 
 
 def score(product: Dict[str, Any], wanted: str, target_g: Optional[float]) -> float:
@@ -135,42 +237,62 @@ def score(product: Dict[str, Any], wanted: str, target_g: Optional[float]) -> fl
     similarity = name_similarity(wanted, name)
 
     # A contradicted qualifier sinks the candidate outright, and so does being
-    # a jar of something when the recipe wanted the vegetable.
+    # a jar of something when the recipe wanted the vegetable. A cut nobody
+    # asked for counts against more gently: diced chicken breast is still
+    # chicken breast, it is just not the pack the plan buys.
     s = (3.0 * similarity
          - 2.5 * conflict_penalty(wanted, name)
-         - 3.0 * form_penalty(wanted, name))
+         - 3.0 * form_penalty(wanted, name)
+         - 0.9 * processed_penalty(wanted, name)
+         - 0.8 * mixture_penalty(wanted, name))
 
-    # Pack closeness is a tie-breaker, and only once identity is credible.
-    if similarity >= 0.5:
-        s += 1.0 * pack_closeness(target_g, product.get("pack_g"))
+    # Pack size counts in both directions. Gating it behind a name score meant
+    # the only candidate it ever applied to was whichever had the shortest
+    # name, which for chicken breast is an 80g packet of sliced deli meat --
+    # every pack that actually matched the kilo the plan buys scored below the
+    # gate and got nothing for it.
+    # Weighted below the name deliberately. The plan's pack figure is the
+    # builder's own estimate rather than anything the shopper chose, so it is
+    # allowed to separate two products that read alike -- not to override a
+    # name that reads better.
+    s += 1.1 * pack_term(target_g, product.get("pack_g"))
 
     if product.get("in_stock"):
-        s += 0.15
-    if product.get("per_kg") is not None:
         s += 0.15
     return s
 
 
-def rank_key(
-    product: Dict[str, Any], wanted: str, target_g: Optional[float]
-) -> tuple:
-    """Identity first; where identity genuinely ties, the better buy wins.
+def _rank_cmp(left: Dict[str, Any], right: Dict[str, Any],
+              wanted: str, target_g: Optional[float]) -> int:
+    """Order two candidates: identity first, then value where comparable.
 
     "Polenta" describes "La Gina Polenta Corn Meal 500g" and "Marco Polo
     Polenta 750g" exactly as well -- both are polenta, and everything else in
-    either name is brand and packaging. Nothing in the words can separate them,
-    so the order the store happened to list them in was deciding, which is how
-    a search for polenta settles on the dearer corn meal.
+    either name is brand and packaging. Nothing in the words separates them, so
+    the order the store happened to list them in was quietly deciding. This is
+    a price tool: where two candidates are equally the right thing, the cheaper
+    kilo is the answer.
 
-    This is a price tool. When two candidates are equally the right thing, the
-    cheaper kilo is the answer. Scores are compared rounded, because a
-    hundredth of a point is noise rather than a real preference, and a
-    candidate with no weight basis sorts last so it can never win on a price
-    per kilo it does not have.
+    Scores are compared rounded, because a hundredth of a point is noise rather
+    than a preference. Where either candidate is sold by the each and has no
+    weight to divide by, there is no honest comparison to make and the store's
+    own order stands -- the sort is stable, so nothing moves.
     """
-    per_kg = product.get("per_kg")
-    value = -per_kg if per_kg else float("-inf")
-    return (round(score(product, wanted, target_g), 2), value)
+    diff = (round(score(left, wanted, target_g), 2)
+            - round(score(right, wanted, target_g), 2))
+    if diff:
+        return -1 if diff > 0 else 1
+    a, b = left.get("per_kg"), right.get("per_kg")
+    if a and b and a != b:
+        return -1 if a < b else 1
+    # Loose produce is sold by the each and has no kilo to divide by, so a
+    # capsicum cannot be compared with a punnet that way. The shelf price is
+    # the honest comparison left, and between two products already judged
+    # equally right, the cheaper one is the answer.
+    a, b = left.get("pack_price"), right.get("pack_price")
+    if a and b and a != b:
+        return -1 if a < b else 1
+    return 0
 
 
 _SEARCHERS = {
@@ -238,8 +360,8 @@ def resolve_from_products(
     wanted = f"{query} {food}"
     ranked = sorted(
         found["products"],
-        key=lambda p: rank_key(p, wanted, target_pack_g),
-        reverse=True,
+        key=functools.cmp_to_key(
+            lambda a, b: _rank_cmp(a, b, wanted, target_pack_g)),
     )
     best = ranked[0]
 
@@ -273,6 +395,10 @@ def resolve_from_products(
     if form_penalty(wanted, best.get("name", "")):
         reasons.append("looks like a prepared version rather than the "
                        "ingredient itself")
+    if processed_penalty(wanted, best.get("name", "")):
+        reasons.append("is a cut or treatment the plan did not ask for")
+    if mixture_penalty(wanted, best.get("name", "")):
+        reasons.append("is a mixture rather than the single ingredient")
     if clashes:
         reasons.append("contradicts a qualifier in the planned food")
     if similarity < 0.4:

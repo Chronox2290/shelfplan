@@ -203,7 +203,28 @@ def rebalance(
     cupboard -- none of which this can know.
     """
     lookup = recipe_lib.INGREDIENTS
-    known = [i for i in ingredients if i.get("food") in lookup]
+
+    def _grams(item: Dict[str, Any]) -> Optional[float]:
+        """A recipe calls it gramsPerServing; a bare list calls it grams.
+
+        Reading only one of them meant handing a recipe's own ingredients
+        straight back produced a KeyError and a 500, which is the most obvious
+        thing anyone would try.
+        """
+        for key in ("grams", "gramsPerServing", "gramsTotal"):
+            value = item.get(key)
+            if value is not None:
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    known = [{**i, "grams": _grams(i)} for i in ingredients
+             if i.get("food") in lookup and _grams(i) is not None]
+    if not known:
+        return {"status": "error",
+                "message": "None of those ingredients had a weight to work from."}
     changed = next((i for i in known if i["food"] == changed_food), None)
     if changed is None:
         return {"status": "error",

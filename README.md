@@ -1186,3 +1186,79 @@ cheaper kilo now wins.
 Polenta, dry           ->  Marco Polo Polenta 750g          $4.31/kg
 Extra virgin olive oil ->  Moro Primero Olive Oil 1L        $13.50
 ```
+
+## An ingredient is not a sandwich filling
+
+Searching Woolworths for "chicken breast" and taking the best name match gave
+*Primo Chicken Breast Sliced 80g* -- deli meat at $49/kg -- ahead of the kilo of
+fillets the plan actually buys. Four separate faults, each real:
+
+* **Pack size was gated behind the name score.** It only applied to candidates
+  scoring 0.5 or better, and the shortest name always scores best, so the only
+  product it ever reached was the 80g packet. Every pack that matched the kilo
+  wanted scored below the gate and got nothing for it. Pack size now counts in
+  both directions and is never gated.
+* **Store-brand blurb was punishing.** "Woolworths RSPCA Approved" is three
+  words of provenance and no food, and measuring how much of a name is on-topic
+  scored it below the deli packet. Words that say who made it or how it was
+  farmed are now ignored, as are pack sizes -- "1kg" was being read as a
+  describing word.
+* **Names were read as a bag of words.** Australian labels read brand, then
+  food, then what was done to it: *La Gina | Polenta | Corn Meal*. Everything
+  before the food is brand; everything after changes what it is. Trailing words
+  now cost full price and leading ones a third, which separates plain polenta
+  from polenta corn meal without throwing away every long store-brand name.
+* **A mix read as the single thing.** "Kale & Baby Spinach" and "Carrot,
+  Cauliflower & Broccoli" are mixtures, and the conjunction was invisible --
+  "and" is a stopword. A product joining two foods now loses to the one.
+
+Two more, found while testing: a search for zucchini returned a **cookbook**
+called *Artichoke to Zucchini*, and mushrooms returned an **acrylic ornament**.
+Both come from Woolworths' Everyday Market, a third-party marketplace served
+through the same search and distinguishable by having no trading department at
+all. Only real grocery lines are accepted now.
+
+## Twenty dishes, not six
+
+Six templates across ten themes meant every Irish recipe was a soup or a tray
+bake. Fourteen more shapes -- stew, braise, chowder, skillet, bake, noodles,
+fried rice, salad, wrap, skewers, pilaf, frittata, tagine, crumbed -- and
+thirty-one more ingredients bring it to roughly **19,000 distinct dishes**,
+1,400 to 3,000 per theme:
+
+```
+italian 1,660   japanese 3,066   chinese 3,030   thai 1,414   indian 1,791
+greek 1,902     mexican 1,960    irish 1,930     middle-eastern 2,114
+```
+
+Each theme names its own dishes, so a Japanese rice bowl is a donburi, a
+crumbed cutlet is a katsu, and a Greek skewer is souvlaki. `The recipe book`
+on the Recipe builder tab pages through them.
+
+## Pictures of what actually goes in
+
+A generated recipe has no photograph, and inventing one would be a picture of a
+dish nobody cooked. Showing the ingredients is both honest and more useful:
+these are the real product shots already fetched for pricing, so a card shows
+the chicken, the rice and the broccoli that are actually in it. 89 of the 90
+ingredients have one; the rest fall back to a lettered tile.
+
+## Planning the whole week
+
+The planner has existed since daily targets went in, and there was no way to
+ask for it from the page -- which is a feature that may as well not exist.
+**Plan it for me** on the Week tab takes a calorie ceiling and protein and
+fibre floors and fills seven days.
+
+It no longer requires a stocked library either. Where there are not enough
+saved dishes it composes them to the same targets and saves them, so what was
+planned is a real recipe to rate, cook or delete.
+
+Getting seven days out of seven to meet the targets took three fixes. Dividing
+the ceiling evenly between meals left the packer no room, so it now aims under
+the ceiling and over the floors. Building exactly enough dishes meant the last
+days took whatever was left, so it builds a few spare. And every day came in on
+calories and protein but short on fibre, because nothing was ever told the
+fibre floor -- now that it is, the solver answers it the way a person would, by
+serving more vegetables and by choosing one that can carry it. A tomato is
+1.2g of fibre per 100g; no sane portion of it reaches 30g a day.

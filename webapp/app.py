@@ -8,6 +8,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import os
+import re
 import sys
 
 from fastapi import (
@@ -170,6 +171,9 @@ class AutoPlanRequest(BaseModel):
     floor_fibre: float = Field(default=25, ge=5, le=100)
     max_repeats: int = Field(default=3, ge=1, le=14)
     apply: bool = Field(default=False, description="Write it into the plan.")
+    # Used only when the library is too thin and dishes have to be composed.
+    cuisine: str = Field(default="any", max_length=40)
+    diet: str = Field(default="any", max_length=20)
 
 
 class RebalanceRequest(BaseModel):
@@ -628,6 +632,72 @@ def generate_recipes(
     }
 
 
+@app.get("/api/recipes/browse")
+def browse_recipes(
+    cuisine: str = "any",
+    diet: str = "any",
+    category: str = "",
+    kcal: float = 600,
+    protein: float = 40,
+    servings: int = 4,
+    limit: int = 48,
+    offset: int = 0,
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """A page of every dish a theme can make.
+
+    The builder answers "what should I eat to hit these numbers". This answers
+    the other question people actually ask, which is "show me what there is".
+    """
+    return recipes.browse(
+        cuisine=cuisine, diet=diet, category=category or None,
+        servings=max(1, min(int(servings), 12)),
+        kcal_per_serving=kcal, protein_per_serving=protein,
+        limit=max(1, min(int(limit), 120)), offset=max(0, int(offset)))
+
+
+@app.get("/api/food-images")
+def food_images(
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """A photograph for every ingredient the builder can use.
+
+    A generated recipe has no photograph of its own and inventing one would be
+    a lie about a dish nobody has cooked. What is honest, and turns out to be
+    more useful, is showing what actually goes in it: these are the real
+    product shots from the catalogue, already fetched for pricing.
+    """
+    wanted = {name: meta["query"] for name, meta in recipes.INGREDIENTS.items()}
+    found: Dict[str, str] = {}
+    for name, query in wanted.items():
+        # The catalogue requires every word to appear, which is right for a
+        # search box and wrong here: the shopping queries carry words no label
+        # has -- "420g tin", "12 pack", "RSPCA" -- so the strictest form finds
+        # nothing for exactly the staples most worth a picture. Loosen a step
+        # at a time and stop at the first thing that answers.
+        plain = name.split(",")[0]
+        # The pack size in a shopping query is the part no product label
+        # repeats, so dropping it is the first and usually the only step
+        # needed: "Burghul Wheat 500g" finds nothing, "Burghul Wheat" finds it.
+        unsized = " ".join(w for w in query.split()
+                           if not re.match(r"^\d+(?:\.\d+)?(?:g|kg|ml|l|pk)?$", w, re.I)
+                           and w.lower() not in ("pack", "tin", "tins", "jar"))
+        attempts = [query, unsized, plain,
+                    " ".join(plain.split()[:2]), plain.split()[0]]
+        for attempt in attempts:
+            if not attempt:
+                continue
+            hit = pricing.catalogue_search(
+                session, query=attempt, store="woolworths", limit=4)
+            image = next((p["image"] for p in hit.get("products", [])
+                          if p.get("image")), None)
+            if image:
+                found[name] = image
+                break
+    return {"images": found, "count": len(found), "of": len(wanted)}
+
+
 @app.post("/api/recipes/import")
 def import_recipe(
     body: ImportRequest,
@@ -717,10 +787,57 @@ def autoplan(
     user: User = Depends(auth.current_user),
     session: Session = Depends(get_session),
 ) -> Dict[str, Any]:
-    """Fill the week from the saved library so each day meets its targets."""
+    """Fill the week so each day meets its targets, cooking to fill gaps.
+
+    Planning from the saved library alone means a new account is told to go and
+    build recipes first, which is the wrong answer to "plan my week for me".
+    Where the library is too thin to fill seven days without repeating itself,
+    the missing dishes are composed to the same targets and saved -- so what
+    was planned is a real recipe you can rate, cook, or delete.
+    """
     plan = _owned_plan(session, user, plan_id)
-    library = [_recipe_json(r) for r in session.scalars(
-        select(Recipe).where(Recipe.user_id == user.id)).all()]
+    rows = list(session.scalars(
+        select(Recipe).where(Recipe.user_id == user.id)).all())
+
+    # Enough dishes that the packer has a choice on the last day too. Exactly
+    # enough -- seven dishes for twenty-one slots at three repeats each -- means
+    # the final days take whatever is left rather than what fits.
+    wanted = max(8, body.days * body.meals_per_day
+                 // max(1, body.max_repeats) + 3)
+    if len(rows) < wanted:
+        existing = {r.name for r in rows}
+        fresh = recipes.build_plan(
+            seed=f"auto:{user.id}:{plan_id}:{len(rows)}",
+            meals=wanted - len(rows), servings=4,
+            # Aim under the ceiling and over the floor. Dividing them evenly
+            # leaves the packer no room at all: three meals at exactly a third
+            # of the ceiling fail the day on the first rounding.
+            kcal_per_serving=max(
+                200.0, body.ceiling / max(1, body.meals_per_day) * 0.9),
+            protein_per_serving=max(
+                10.0, body.floor_protein / max(1, body.meals_per_day) * 1.15),
+            diet=body.diet or "any", cuisine=body.cuisine or "any",
+            # Without the fibre floor the builder optimises for calories and
+            # protein alone, and every composed day then lands on target for
+            # both and short on fibre -- which is exactly the miss the planner
+            # was asked to avoid.
+            targets={"kcal": max(200.0, body.ceiling / max(1, body.meals_per_day) * 0.9),
+                     "protein": max(10.0, body.floor_protein
+                                    / max(1, body.meals_per_day) * 1.15),
+                     "fibreMin": max(2.0, body.floor_fibre
+                                     / max(1, body.meals_per_day) * 1.15)})
+        for item in (fresh or []):
+            name = str(item.get("name") or "").strip()[:300]
+            if not name or name in existing:
+                continue
+            payload = {k: v for k, v in item.items() if k != "name"}
+            row = Recipe(user_id=user.id, name=name, data=payload)
+            session.add(row)
+            rows.append(row)
+            existing.add(name)
+        session.commit()
+
+    library = [_recipe_json(r) for r in rows]
 
     goals = {"ceiling": body.ceiling, "floorP": body.floor_protein,
              "floorF": body.floor_fibre}
@@ -745,6 +862,7 @@ def autoplan(
         session.commit()
         result["applied"] = True
 
+    result["library"] = library
     return result
 
 

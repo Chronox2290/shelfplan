@@ -345,6 +345,59 @@ input.mult{width:42px;padding:2px 5px;font-size:12.5px;text-align:center}
 .clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (prefers-reduced-motion:reduce){.scan-flash.lit{animation:none}}
 
+/* ingredient photographs -------------------------------------------------
+   A generated recipe has no photograph of its own. These are the real product
+   shots from the catalogue, so a card shows what actually goes in the dish
+   rather than a stock picture of something nobody cooked. */
+.food-pic{object-fit:contain;background:var(--sunk);border-radius:7px;
+  flex:none;display:block}
+.food-pic.none{display:flex;align-items:center;justify-content:center;
+  color:var(--ink-3);font-family:Archivo;font-weight:600;line-height:1}
+.food-pic.tiny{width:22px;height:22px;border-radius:5px;font-size:10px}
+.food-pic.small{width:30px;height:30px;font-size:12px}
+.food-pic.tile{width:54px;height:54px;font-size:17px}
+.food-pic.big{width:100%;height:74px;border-radius:0;font-size:20px}
+
+.recipe-strip{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;
+  gap:1px;background:var(--rule);border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule);margin:2px 0 0}
+.strip-cell{margin:0;background:var(--panel);display:flex;
+  flex-direction:column;min-width:0}
+.strip-cell figcaption{font-size:10.5px;color:var(--ink-3);padding:4px 6px 5px;
+  text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  letter-spacing:.02em}
+
+.ing-row{display:flex;align-items:center;gap:9px}
+.ing-name{flex:1;min-width:0}
+
+/* the recipe book ------------------------------------------------------- */
+.book-grid{display:grid;gap:12px;margin-top:14px;
+  grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.book-tile{display:flex;flex-direction:column;border:1px solid var(--rule);
+  border-radius:11px;overflow:hidden;background:var(--panel)}
+.tile-pics{display:flex;gap:1px;background:var(--rule)}
+.tile-pics .food-pic{flex:1;width:auto;height:60px;border-radius:0}
+.tile-body{display:flex;flex-direction:column;flex:1;gap:6px;padding:10px 11px 11px}
+.tile-body .macros{gap:9px;flex-wrap:wrap}
+
+/* planning a whole week ------------------------------------------------- */
+.auto-card{border-color:var(--accent)}
+.auto-days{display:grid;gap:7px;margin-top:10px}
+.auto-day{padding:8px 11px;border-radius:9px;background:var(--sunk);
+  border-left:3px solid var(--accent)}
+.auto-day.miss{border-left-color:var(--warn)}
+.auto-day-top{display:flex;justify-content:space-between;align-items:baseline;
+  gap:10px;flex-wrap:wrap}
+.warn-text{color:var(--warn)}
+
+/* a one-line report ----------------------------------------------------- */
+.toast{position:fixed;left:50%;bottom:18px;transform:translate(-50%,140%);
+  z-index:60;max-width:min(560px,92vw);padding:10px 16px;border-radius:10px;
+  background:var(--ink);color:var(--panel);font-size:13.5px;
+  box-shadow:0 12px 30px -10px rgba(0,0,0,.5);transition:transform .22s ease}
+.toast.up{transform:translate(-50%,0)}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+
 /* picker sheet */
 .sheet-back{position:fixed;inset:0;background:rgba(19,23,20,.45);z-index:40}
 .sheet{position:fixed;z-index:41;left:50%;top:50%;transform:translate(-50%,-50%);

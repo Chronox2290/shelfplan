@@ -165,6 +165,26 @@ async function savePlan() {
   await api('/plans/' + state.planId, { method: 'PUT', body: { data: state.plan.data } });
 }
 
+/* A one-line report that does not need a place on the page to live. Errors
+   used to be pushed into whichever div happened to be nearby, which meant the
+   ones raised from a dialog had nowhere to go at all. */
+
+let toastTimer = null;
+
+function toast(message, kind) {
+  let bar = $('toastBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'toastBar';
+    document.body.appendChild(bar);
+  }
+  bar.className = 'toast' + (kind ? ' ' + kind : '') + ' up';
+  bar.textContent = String(message || '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => bar.classList.remove('up'), 4200);
+}
+
+
 /* ------------------------------------------------------------------- tabs */
 
 document.querySelectorAll('nav.tabs button').forEach((btn) => {
@@ -192,8 +212,8 @@ function render() {
   if (state.tab === 'search') wireSearch();
   if (state.tab === 'shop') wireShop();
   if (state.tab === 'data') wireData();
-  if (state.tab === 'build') wireBuild();
-  if (state.tab === 'week') wireWeek();
+  if (state.tab === 'build') { wireBuild(); wireBook(); }
+  if (state.tab === 'week') { wireAuto(); wireWeek(); }
   if (state.tab === 'recipes') wireRecipes();
   if (state.tab === 'findrec') wireFindRecipe();
   if (state.tab === 'own') wireOwn();
@@ -267,7 +287,8 @@ function viewBuild() {
     <p class="muted small" style="margin:8px 0 0">
       <b>Build and price</b> makes a full week and costs it.
       <b>Offer me choices</b> proposes a few different meals so you can pick.</p>
-    <div id="bOut" style="margin-top:16px"></div></div>`;
+    <div id="bOut" style="margin-top:16px"></div></div>
+    ${bookPanel()}`;
 }
 
 function wireBuild() {
@@ -534,7 +555,9 @@ function recipeCard(r, opts) {
     const per = i.gramsPerServing != null ? `${i.gramsPerServing} g` : (i.qty || '');
     const tot = i.gramsTotal != null
       ? `<span class="muted"> (${i.gramsTotal} g total)</span>` : '';
-    return `<div class="meal">${esc(i.food || i.name || '')}
+    const food = i.food || i.name || '';
+    return `<div class="meal ing-row">${foodPhoto(food, 'small')}
+      <span class="ing-name">${esc(food)}</span>
       <span class="num">${esc(per)}</span>${tot}</div>`;
   }).join('');
 
@@ -581,6 +604,7 @@ function recipeCard(r, opts) {
       <h3 style="flex:1;min-width:0">${esc(r.name)}</h3>${add}
     </div>
     <div class="recipe-tags">${tags}</div>
+    ${recipeStrip(r)}
     <div class="recipe-body">
       ${macroLine(r.perServing, r.servings)}
       <h4>Ingredients</h4>${ing}${steps}${reheat}${notes}
@@ -736,9 +760,13 @@ function viewWeek() {
   const g = goals();
 
   if (!library.length) {
-    return `<div class="card"><h2>Plan your week</h2>
-      <p class="sub">Your library is empty. Build recipes in the
-        <b>Recipe builder</b> and save them, then plan days here.</p></div>`;
+    // An empty library is no longer a dead end: the planner composes what it
+    // needs, so the panel that does that is exactly what belongs here.
+    auto.show = true;
+    return `${autoPanel()}
+      <div class="card"><h2>Or build them yourself</h2>
+      <p class="sub">Nothing saved yet. Plan the week above and it will cook the
+        dishes to fill it, or build your own in the <b>Recipe builder</b>.</p></div>`;
   }
 
   if (!week.monday) week.monday = mondayOf(new Date());
@@ -769,6 +797,7 @@ function viewWeek() {
         <label class="tick" title="${off ? 'Skipped' : 'Eating this'}">
           <input type="checkbox" data-on="${di}:${mi}" ${off ? '' : 'checked'}>
           <span class="dot cat-${esc(categoryOf(r))}"></span>
+          ${mealThumb(r)}
           <span class="meal-name">${esc(r.name)}</span></label>
         <div class="meal-controls">
           <input type="number" class="mult" data-mult="${di}:${mi}"
@@ -818,9 +847,11 @@ function viewWeek() {
 
     <div class="row" style="margin-top:12px">
       <button id="weekShop" class="primary">Build shopping list</button>
+      <button id="autoOpen">Plan it for me</button>
       <button id="weekClear" class="ghost">Clear week</button>
       <button id="planUndo" class="ghost" title="Restore the previous version of this plan">Undo</button>
     </div>
+    <div id="autoHost">${auto.show ? autoPanel() : ''}</div>
 
     <div class="stats" style="margin-top:14px">
       <div class="stat"><div class="k">Days that work</div>
@@ -2458,6 +2489,382 @@ function wireScanResult() {
   });
 }
 
+/* --------------------------------------------------------- ingredient photos
+
+A generated recipe has no photograph of its own, and inventing one would be a
+picture of a dish nobody cooked. What is both honest and more useful is showing
+what actually goes in it -- the real product shots, already fetched for pricing.
+
+The map is small and changes rarely, so it is kept in the browser between
+visits and refreshed weekly rather than on every load.                        */
+
+const PHOTO_KEY = 'shelfplan.foodImages';
+const PHOTO_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const photos = { map: {}, loading: null };
+
+function readStoredPhotos() {
+  try {
+    const raw = localStorage.getItem(PHOTO_KEY);
+    if (!raw) return null;
+    const held = JSON.parse(raw);
+    if (!held || !held.at || Date.now() - held.at > PHOTO_MAX_AGE_MS) return null;
+    return held.map || null;
+  } catch (_) { return null; }
+}
+
+async function loadFoodImages(force) {
+  if (photos.loading) return photos.loading;
+  if (!force) {
+    const held = readStoredPhotos();
+    if (held) { photos.map = held; return held; }
+  }
+  photos.loading = (async () => {
+    try {
+      const res = await api('/food-images');
+      photos.map = res.images || {};
+      try {
+        localStorage.setItem(PHOTO_KEY,
+          JSON.stringify({ at: Date.now(), map: photos.map }));
+      } catch (_) { /* a private window has no room; the map still works */ }
+      if (Object.keys(photos.map).length) render();
+    } catch (_) { /* pictures are a bonus, never a reason to fail */ }
+    photos.loading = null;
+    return photos.map;
+  })();
+  return photos.loading;
+}
+
+// Ingredient names carry the state they are bought in -- "Chicken breast, raw",
+// "Peas, frozen" -- which is right on a shopping list and noise under a photo.
+function shortFood(name) {
+  return String(name || '').split(',')[0];
+}
+
+function foodPhoto(name, cls) {
+  const src = photos.map[name];
+  const label = shortFood(name);
+  if (!src) {
+    return `<span class="food-pic none ${cls || ''}" aria-hidden="true"
+      >${esc(label.slice(0, 1).toUpperCase())}</span>`;
+  }
+  return `<img class="food-pic ${cls || ''}" src="${esc(src)}" alt=""
+    loading="lazy" decoding="async">`;
+}
+
+// The dish in four pictures: what it is built on, then whatever else there is
+// most of. Sauces and oils are skipped -- a photograph of a bottle of oil tells
+// you nothing about the meal.
+// One picture is enough on a planned day -- the row is already carrying a
+// name, a serving count and a calorie figure.
+function mealThumb(r) {
+  const items = (r.ingredients || []);
+  const lead = items.find((i) => i.role === 'protein')
+    || items.find((i) => i.role === 'base');
+  return lead ? foodPhoto(lead.food, 'tiny') : '';
+}
+
+
+function recipeStrip(r) {
+  const items = (r.ingredients || []).filter(
+    (i) => i.role !== 'fat' && i.role !== 'sauce');
+  const wanted = [];
+  ['protein', 'base', 'veg'].forEach((role) => {
+    const hit = items.find((i) => i.role === role);
+    if (hit) wanted.push(hit);
+  });
+  items.forEach((i) => {
+    if (wanted.length < 4 && !wanted.includes(i)) wanted.push(i);
+  });
+  if (!wanted.length) return '';
+
+  return `<div class="recipe-strip">${wanted.map((i) => `
+    <figure class="strip-cell">
+      ${foodPhoto(i.food, 'big')}
+      <figcaption>${esc(shortFood(i.food))}</figcaption>
+    </figure>`).join('')}</div>`;
+}
+
+/* ------------------------------------------------------------ the recipe book
+
+The builder answers "what should I eat to hit these numbers". This answers the
+other question people actually ask, which is "show me what there is". Every
+combination the themes can make is walkable -- a couple of thousand per theme --
+so it pages rather than loading the lot.                                      */
+
+const book = { cuisine: 'any', category: '', recipes: [], total: 0,
+               next: 0, busy: false, open: false };
+
+function bookPanel() {
+  if (!book.open) {
+    return `<div class="card">
+      <div class="row" style="align-items:baseline">
+        <div style="flex:1;min-width:0">
+          <h2 style="margin:0">The recipe book</h2>
+          <p class="sub" style="margin:4px 0 0">Thousands of dishes across nine
+            themes. Browse them instead of describing what you want.</p>
+        </div>
+        <button id="bookOpen" class="primary">Open the book</button>
+      </div></div>`;
+  }
+
+  const themes = (state.cuisines || [{ id: 'any', label: 'No theme' }]);
+  const grid = book.recipes.length
+    ? `<div class="book-grid">${book.recipes.map(bookTile).join('')}</div>`
+    : (book.busy ? '' : '<p class="muted">Nothing matches those filters.</p>');
+
+  return `<div class="card">
+    <div class="row" style="align-items:baseline">
+      <h2 style="flex:1;min-width:0;margin:0">The recipe book</h2>
+      <button class="ghost tiny" id="bookClose">Close</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div style="flex:1;min-width:150px">
+        <label for="bookCuisine">Theme</label>
+        <select id="bookCuisine">${themes.map((c) =>
+          `<option value="${esc(c.id)}" ${c.id === book.cuisine ? 'selected' : ''}
+            >${esc(c.label)}</option>`).join('')}</select>
+      </div>
+      <div style="flex:1;min-width:150px">
+        <label for="bookCat">Kind</label>
+        <select id="bookCat">
+          <option value="">Anything</option>
+          ${CAT_ORDER.map((c) => `<option value="${esc(c)}"
+            ${c === book.category ? 'selected' : ''}>${esc(CAT_LABEL[c])}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <p class="muted small" style="margin:10px 0 0">
+      ${book.total ? `${book.total.toLocaleString()} dishes in this theme.` : ''}
+      ${book.recipes.length ? `Showing ${book.recipes.length}.` : ''}</p>
+    ${grid}
+    ${book.busy ? '<div class="note" style="margin-top:12px">Composing&hellip;</div>' : ''}
+    ${book.next != null && book.recipes.length ? `<div class="row" style="margin-top:14px">
+      <button id="bookMore" ${book.busy ? 'disabled' : ''}>Show me more</button>
+      </div>` : ''}
+  </div>`;
+}
+
+function bookTile(r) {
+  const per = r.perServing || {};
+  const cat = CAT_ORDER.includes(r.category) ? r.category : 'other';
+  return `<article class="book-tile">
+    <div class="tile-pics">${(r.ingredients || [])
+      .filter((i) => i.role === 'protein' || i.role === 'base' || i.role === 'veg')
+      .slice(0, 3).map((i) => foodPhoto(i.food, 'tile')).join('')}</div>
+    <div class="tile-body">
+      <div class="row" style="gap:6px;align-items:flex-start">
+        <span class="dot cat-${esc(cat)}" style="margin-top:5px"></span>
+        <b style="flex:1;min-width:0">${esc(r.name)}</b>
+      </div>
+      <div class="macros num small">
+        <span><b>${Math.round(per.kcal || 0)}</b> kcal</span>
+        <span><b>${Math.round(per.p || 0)}</b>g protein</span>
+        <span><b>${Math.round(per.fb || 0)}</b>g fibre</span>
+      </div>
+      <div class="row" style="margin-top:auto;padding-top:8px">
+        <button class="ghost tiny" data-bookopen="${esc(r.id)}">See it</button>
+        <div style="flex:1"></div>
+        <button class="tiny primary" data-booksave="${esc(r.id)}">Save</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+async function loadBook(reset) {
+  if (book.busy) return;
+  book.busy = true;
+  if (reset) { book.recipes = []; book.next = 0; book.total = 0; }
+  render();
+  try {
+    const res = await api('/recipes/browse?cuisine=' + encodeURIComponent(book.cuisine)
+      + '&category=' + encodeURIComponent(book.category)
+      + '&limit=24&offset=' + (book.next || 0));
+    book.total = res.total;
+    book.next = res.nextOffset;
+    book.recipes = book.recipes.concat(res.recipes || []);
+  } catch (err) {
+    toast(err.message);
+  }
+  book.busy = false;
+  render();
+}
+
+function wireBook() {
+  const open = $('bookOpen');
+  if (open) {
+    open.addEventListener('click', () => {
+      book.open = true;
+      loadBook(true);
+    });
+    return;
+  }
+  const close = $('bookClose');
+  if (close) close.addEventListener('click', () => { book.open = false; render(); });
+
+  const cuisine = $('bookCuisine');
+  if (cuisine) cuisine.addEventListener('change', () => {
+    book.cuisine = cuisine.value;
+    loadBook(true);
+  });
+  const cat = $('bookCat');
+  if (cat) cat.addEventListener('change', () => {
+    book.category = cat.value;
+    loadBook(true);
+  });
+  const more = $('bookMore');
+  if (more) more.addEventListener('click', () => loadBook(false));
+
+  document.querySelectorAll('[data-bookopen]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const r = book.recipes.find((x) => x.id === btn.dataset.bookopen);
+      if (r) showRecipeSheet(r);
+    });
+  });
+  document.querySelectorAll('[data-booksave]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const r = book.recipes.find((x) => x.id === btn.dataset.booksave);
+      if (!r) return;
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        const res = await api('/recipes/save-many',
+          { method: 'POST', body: { recipes: [r] } });
+        await loadRecipes();
+        btn.textContent = res.saved ? 'In your library' : 'Already saved';
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Save';
+        toast(err.message);
+      }
+    });
+  });
+}
+
+function showRecipeSheet(r) {
+  const host = document.createElement('div');
+  host.id = 'recipeHost';
+  host.innerHTML = `<div class="sheet-back" id="recBack"></div>
+    <div class="sheet" role="dialog" aria-label="${esc(r.name)}">
+      <div class="sheet-top">
+        <h3 style="margin:0;flex:1;min-width:0">${esc(r.name)}</h3>
+        <button class="ghost" id="recClose">Close</button>
+      </div>
+      <div class="sheet-body">${recipeCard(r, {})}</div>
+    </div>`;
+  document.body.appendChild(host);
+  const shut = () => host.remove();
+  $('recBack').addEventListener('click', shut);
+  $('recClose').addEventListener('click', shut);
+}
+
+/* ----------------------------------------------------- planning a whole week
+
+The server has been able to do this since the daily targets went in; there was
+simply no way to ask it from the page. Give it a calorie ceiling and protein
+and fibre floors and it fills seven days, composing whatever the library is
+missing rather than telling you to go and build recipes first.               */
+
+const auto = { busy: false, result: null, show: false };
+
+function autoPanel() {
+  const g = goals();
+  return `<div class="card auto-card">
+    <div class="row" style="align-items:baseline">
+      <div style="flex:1;min-width:0">
+        <h2 style="margin:0">Plan the week for me</h2>
+        <p class="sub" style="margin:4px 0 0">Set the day's numbers and it fills
+          seven days against them, cooking whatever your library is short of.</p>
+      </div>
+    </div>
+    <div class="grid g2" style="margin-top:12px">
+      <div><label for="aKcal">Calories a day, at most</label>
+        <input id="aKcal" type="number" value="${Math.round(g.ceiling)}" min="800" max="6000" step="50"></div>
+      <div><label for="aProt">Protein a day, at least (g)</label>
+        <input id="aProt" type="number" value="${Math.round(g.floorP)}" min="20" max="400" step="5"></div>
+      <div><label for="aFibre">Fibre a day, at least (g)</label>
+        <input id="aFibre" type="number" value="${Math.round(g.floorF)}" min="5" max="100" step="1"></div>
+      <div><label for="aMeals">Meals a day</label>
+        <input id="aMeals" type="number" value="3" min="1" max="6"></div>
+      <div><label for="aRepeat">Same dish, at most</label>
+        <input id="aRepeat" type="number" value="3" min="1" max="14"></div>
+      <div><label for="aCuisine">Theme for anything new</label>
+        <select id="aCuisine">${(state.cuisines || [{ id: 'any', label: 'No theme' }])
+          .map((c) => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}
+        </select></div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button id="aGo" class="primary" ${auto.busy ? 'disabled' : ''}>${
+        auto.busy ? 'Planning…' : 'Plan my week'}</button>
+      <span class="muted small">This replaces the week. Undo is on the Data tab.</span>
+    </div>
+    <div id="aOut" style="margin-top:14px">${auto.result ? autoSummary(auto.result) : ''}</div>
+  </div>`;
+}
+
+function autoSummary(res) {
+  const days = res.days || [];
+  if (!days.length) {
+    return `<div class="warn">${esc(res.message || 'Nothing could be planned.')}</div>`;
+  }
+  const rows = days.map((d, i) => {
+    const t = d.totals || {};
+    const met = d.met || {};
+    const missed = [
+      met.kcal ? '' : 'over on calories',
+      met.protein ? '' : 'short on protein',
+      met.fibre ? '' : 'short on fibre',
+    ].filter(Boolean);
+    return `<div class="auto-day${missed.length ? ' miss' : ''}">
+      <div class="auto-day-top">
+        <b>${esc(DAYS[i % 7])}</b>
+        <span class="num small">${Math.round(t.kcal || 0)} kcal &middot;
+          ${Math.round(t.p || 0)}g protein &middot; ${Math.round(t.fb || 0)}g fibre</span>
+      </div>
+      <div class="muted small">${esc((d.names || []).join(' · '))}</div>
+      ${missed.length ? `<div class="small warn-text">${esc(missed.join(', '))}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  return `<p class="note">${esc(res.message || '')}</p>
+    <div class="auto-days">${rows}</div>`;
+}
+
+function wireAuto() {
+  const open = $('autoOpen');
+  if (open) {
+    open.textContent = auto.show ? 'Hide the planner' : 'Plan it for me';
+    open.addEventListener('click', () => { auto.show = !auto.show; render(); });
+  }
+  const go = $('aGo');
+  if (!go) return;
+  go.addEventListener('click', async () => {
+    auto.busy = true;
+    render();
+    try {
+      const body = {
+        days: 7,
+        meals_per_day: Number($('aMeals').value) || 3,
+        ceiling: Number($('aKcal').value) || 2000,
+        floor_protein: Number($('aProt').value) || 150,
+        floor_fibre: Number($('aFibre').value) || 25,
+        max_repeats: Number($('aRepeat').value) || 3,
+        cuisine: ($('aCuisine') || {}).value || 'any',
+        apply: true,
+      };
+      auto.result = await api('/plans/' + state.planId + '/autoplan',
+        { method: 'POST', body });
+      // The planner may have composed dishes and it writes the day's targets
+      // into the plan, so both have moved underneath us.
+      await loadRecipes();
+      await loadPlan();
+    } catch (err) {
+      toast(err.message);
+    }
+    auto.busy = false;
+    render();
+  });
+}
+
 /* -------------------------------------------------------- write your own */
 
 const own = { name: '', servings: 4, items: [], steps: [''], busy: false };
@@ -2809,6 +3216,7 @@ async function boot() {
   }
   await loadPlan();
   await loadRecipes();
+  loadFoodImages();      // deliberately not awaited -- the page is usable now
   try {
     state.cuisines = (await api('/cuisines')).cuisines;
   } catch (_) { state.cuisines = null; }
