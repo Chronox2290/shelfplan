@@ -31,3 +31,17 @@ shelf-plan*.html
 catalog_probe.json
 resolve_probe.json
 resolve2.json
+
+# TLS material. `tailscale cert` writes a private key into the working
+# directory, and a key in a public repository is unrecoverable once pushed.
+*.key
+*.crt
+*.pem
+*.p12
+*.keystore
+# The Android build: keep the config so a rebuild is reproducible, but never
+# the signing key or the build output. Losing the keystore means a later build
+# can only replace the app, never update it -- so back it up somewhere safe,
+# just not here.
+android/*
+!android/twa-manifest.json

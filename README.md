@@ -1002,3 +1002,48 @@ otherwise prove the site belongs to whoever signed it. Two things are required:
 
 Keep `android.keystore` and its password. Losing them means a later build can
 only replace the app, never update it.
+
+## The Android app, as built
+
+Built and installed on 31 Aug 2026. What it took, in case it needs doing again:
+
+| Step | Detail |
+|---|---|
+| HTTPS | `tailscale serve --bg --https=443 http://127.0.0.1:8000` |
+| Address | `https://sudo-kun.tail696f09.ts.net` |
+| Package | `au.com.chronox.shelfplan`, version 1.0.0 |
+| Signing | `android/android.keystore`, alias `android` |
+
+Three things blocked the first attempt, all fixed:
+
+* **Bubblewrap needs JDK 17**, not 21. Installed alongside; the JDK it uses is
+  set in `~/.bubblewrap/config.json`, independently of `JAVA_HOME`.
+* **It looks for `tools` or `bin` at the SDK root.** Modern SDKs put the
+  command-line tools in `cmdline-tools/latest`, so a directory junction
+  (`mklink /J`) at `<sdk>/tools` satisfies the check without disturbing the
+  real layout.
+* **`gradlew.bat` is invoked without a path prefix**, which Windows will not
+  resolve. Running `./gradlew.bat assembleRelease` directly works, then align
+  and sign with `zipalign` and `apksigner`.
+
+`local.properties` needs forward slashes (`sdk.dir=E:/dev/android-sdk`);
+backslashes are escape characters in a Java properties file and produce a
+misleading "filename, directory name, or volume label syntax is incorrect".
+
+### It still updates itself
+
+The APK is a shell around the served site, so publishing the web app updates
+the app. Rebuild it only when the name, icon, package or address changes.
+
+### Keep the keystore
+
+`android/android.keystore` is gitignored, as it must be. Back it up somewhere
+safe: without it a later build can only *replace* the app, never update it.
+
+### A caveat about tailnet addresses
+
+Android's automatic link verification is done by Google's servers, which cannot
+reach a tailnet-only hostname, so system-level domain verification will not
+complete. Chrome performs its own asset-links check from the device, which
+can reach it -- so the app still runs without a browser bar. On a publicly
+resolvable domain both checks pass.
