@@ -1087,17 +1087,24 @@ process that earned it.
   in a short body). Passing it means executing their script to earn a clearance
   cookie, which is bot-protection evasion rather than an integration, so this
   reports the block instead of working around it.
-* **Woolworths** answers `403 Access Denied` from Akamai. This one does lift,
-  usually within a few hours.
+* **Woolworths** answers `403 Access Denied` from Akamai. In practice this is
+  almost always the *address*, not the request rate: a VPN exit node is a
+  datacenter IP, and Akamai refuses those on sight. Turning the VPN off fixed
+  it immediately during testing. Genuine volume blocks do happen too and lift
+  after a few hours.
 
 Requests are therefore paced deliberately: **2.5s minimum between Woolworths
 requests**, 1.8s for Coles, one at a time, with a circuit breaker that stops
 calling a store that is refusing and a shared cache so repeat lookups cost
 nothing. The background top-up runs at **one request every five minutes**.
 
-The seeding script defaults to **6 seconds between terms**. It was 1.2s, which
-is what earned a block during development -- a full run at that pace looks
-exactly like a crawler.
+The seeding script defaults to **6 seconds between terms** rather than the
+1.2s it started at. That pace was never proven to cause a block -- a VPN turned
+out to be the culprit -- but a full run at 1.2s does look like a crawler, and
+the slower default costs nothing when the job has all day.
+
+**If prices stop working, check for a VPN first.** It is by far the most common
+cause, and it is instant to rule out.
 
 **None of this stops the app working.** Find food reads the local catalogue, so
 searching, prices and the shopping list all keep working from what has already
