@@ -159,6 +159,7 @@ def remember_products(session: Session, store: str,
         row.per_kg = item.get("per_kg")
         row.cup_string = (item.get("cup_string") or "")[:80]
         row.on_special = bool(item.get("on_special"))
+        row.was_price = item.get("was_price")
         row.in_stock = bool(item.get("in_stock", True))
         row.url = (item.get("url") or "")[:400]
         row.image = (item.get("image") or "")[:400]
@@ -388,6 +389,7 @@ def catalogue_search(
                 "package_size": r.package_size, "pack_g": r.pack_g,
                 "pack_price": r.pack_price, "per_kg": r.per_kg,
                 "cup_string": r.cup_string, "on_special": r.on_special,
+                "was_price": r.was_price,
                 "in_stock": r.in_stock, "url": r.url, "image": r.image,
                 "lastSeen": r.last_seen.isoformat() if r.last_seen else None,
             }
@@ -422,5 +424,6 @@ def by_barcode(session: Session, code: str) -> Optional[Dict[str, Any]]:
         "package_size": row.package_size, "pack_g": row.pack_g,
         "pack_price": row.pack_price, "per_kg": row.per_kg,
         "cup_string": row.cup_string, "on_special": row.on_special,
+        "was_price": row.was_price,
         "in_stock": row.in_stock, "url": row.url, "image": row.image,
     }

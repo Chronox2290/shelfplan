@@ -58,6 +58,20 @@ def sittings_for(meals_per_day: int) -> List[str]:
     return out
 
 
+def recipe_suits(recipe: Dict[str, Any], sitting: Optional[str]) -> bool:
+    """Does this dish belong at that sitting?
+
+    A recipe with nothing recorded predates meal slots, or was written by hand.
+    Treating it as a main is the safer reading: an unlabelled dish is far more
+    likely to be a dinner than a bowl of porridge.
+    """
+    if not sitting:
+        return True
+    listed = recipe.get("meals") or (
+        [recipe["meal"]] if recipe.get("meal") else None)
+    return sitting in (listed or ("lunch", "dinner"))
+
+
 def _sittings(meals_per_day: int) -> List[str]:
     """Name the sittings in a day of this length.
 
@@ -106,16 +120,6 @@ def plan_week(
     out_days: List[Dict[str, Any]] = []
     sittings = _sittings(meals_per_day) if by_meal else [None] * meals_per_day
 
-    # A recipe with nothing recorded predates meal slots, or was written by
-    # hand. Treating it as a main is the safer reading: an unlabelled dish is
-    # far more likely to be a dinner than a bowl of porridge.
-    def suits(recipe: Dict[str, Any], sitting: Optional[str]) -> bool:
-        if not sitting:
-            return True
-        listed = recipe.get("meals") or (
-            [recipe["meal"]] if recipe.get("meal") else None)
-        return sitting in (listed or ("lunch", "dinner"))
-
     for _ in range(days):
         total = {"kcal": 0.0, "p": 0.0, "c": 0.0, "f": 0.0, "fb": 0.0}
         chosen: List[Dict[str, Any]] = []
@@ -130,7 +134,7 @@ def plan_week(
             best = None
             best_score = 0.0
             for recipe in usable:
-                if not suits(recipe, sitting):
+                if not recipe_suits(recipe, sitting):
                     continue
                 if used_count.get(recipe["id"], 0) >= max_repeats:
                     continue

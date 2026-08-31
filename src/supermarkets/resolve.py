@@ -426,6 +426,9 @@ def resolve_from_products(
         "matched_name": best.get("name"),
         "stockcode": best.get("stockcode"),
         "on_special": best.get("on_special"),
+        # What the shelf says it was. A single reading cannot be compared with
+        # its own history, but it can be compared with this.
+        "was_price": best.get("was_price"),
         "in_stock": best.get("in_stock"),
         "package_size": best.get("package_size"),
         "cup_string": best.get("cup_string"),

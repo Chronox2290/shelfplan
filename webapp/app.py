@@ -664,6 +664,47 @@ def browse_recipes(
         limit=max(1, min(int(limit), 120)), offset=max(0, int(offset)))
 
 
+@app.get("/api/nutrition/estimate")
+def estimate_nutrition(
+    name: str = Query(..., min_length=1, max_length=200),
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """Per-100g figures for a product name, from the ingredient table.
+
+    Written-your-own recipes read their nutrition from Open Food Facts, which
+    only answers to a barcode and often does not have Australian store lines at
+    all. When it cannot, every figure came back zero and the recipe went into
+    the week reading 0 kcal -- with nothing on screen saying why.
+
+    A store name still describes a food, so match it against the ingredients
+    already carrying figures. "Woolworths RSPCA Chicken Breast Fillet 1kg" is
+    chicken breast whether or not anyone has scanned it.
+    """
+    best_name = None
+    best_score = 0.0
+    for food, meta in recipes.INGREDIENTS.items():
+        for candidate in (food, meta["query"]):
+            score = resolve.name_similarity(candidate, name)
+            if score > best_score:
+                best_name, best_score = food, score
+
+    # A loose threshold is worse than no answer. At 0.34 a Cadbury Dairy Milk
+    # block matched "Milk, skim" and would have been presented as 35 kcal per
+    # 100g, which is not a near miss but a wrong number stated confidently.
+    if not best_name or best_score < 0.55:
+        return {"status": "not_found", "name": name,
+                "message": "No ingredient close enough to estimate from."}
+
+    meta = recipes.INGREDIENTS[best_name]
+    return {
+        "status": "ok",
+        "name": name,
+        "matched": best_name,
+        "confidence": round(best_score, 2),
+        "per100": {k: meta[k] for k in ("kcal", "p", "c", "f", "fb")},
+    }
+
+
 @app.get("/api/food-images")
 def food_images(
     user: User = Depends(auth.current_user),
@@ -807,16 +848,31 @@ def autoplan(
     rows = list(session.scalars(
         select(Recipe).where(Recipe.user_id == user.id)).all())
 
-    # Enough dishes that the packer has a choice on the last day too. Exactly
-    # enough -- seven dishes for twenty-one slots at three repeats each -- means
-    # the final days take whatever is left rather than what fits.
-    wanted = max(8, body.days * body.meals_per_day
-                 // max(1, body.max_repeats) + 3)
-    if len(rows) < wanted:
+    # Counting recipes was the wrong question. A library of a dozen dinners is
+    # twelve recipes and no breakfasts, so the count said "enough" and the
+    # planner produced seven days of lunch and dinner with the morning empty.
+    # What has to be enough is each sitting separately.
+    sittings = weekplan.sittings_for(body.meals_per_day)
+    # How many dishes a sitting needs is not simply the number of days. Most
+    # savoury dishes suit lunch *and* dinner, so one pool has to cover both:
+    # four dishes repeating three times each is twelve servings against the
+    # fourteen a week of lunches and dinners wants, and the seventh day ran out
+    # with nothing left to put on it. Breakfast has its own pool and its own
+    # smaller need.
+    shared = max(1, len([s for s in sittings if s != "breakfast"]))
+    repeats = max(1, body.max_repeats)
+
+    for sitting in sittings:
+        covers = 1 if sitting == "breakfast" else shared
+        need_each = max(3, -(-body.days * covers // repeats) + 1)
+        have = sum(1 for r in rows
+                   if weekplan.recipe_suits(_recipe_json(r), sitting))
+        if have >= need_each:
+            continue
         existing = {r.name for r in rows}
         fresh = recipes.build_plan(
-            seed=f"auto:{user.id}:{plan_id}:{len(rows)}",
-            meals=wanted - len(rows), servings=4,
+            seed=f"auto:{user.id}:{plan_id}:{sitting}:{len(rows)}",
+            meals=need_each - have, servings=4,
             # Aim under the ceiling and over the floor. Dividing them evenly
             # leaves the packer no room at all: three meals at exactly a third
             # of the ceiling fail the day on the first rounding.
@@ -825,12 +881,13 @@ def autoplan(
             protein_per_serving=max(
                 10.0, body.floor_protein / max(1, body.meals_per_day) * 1.15),
             diet=body.diet or "any", cuisine=body.cuisine or "any",
-            meals_wanted=weekplan.sittings_for(body.meals_per_day),
+            meals_wanted=[sitting],
             # Without the fibre floor the builder optimises for calories and
             # protein alone, and every composed day then lands on target for
             # both and short on fibre -- which is exactly the miss the planner
             # was asked to avoid.
-            targets={"kcal": max(200.0, body.ceiling / max(1, body.meals_per_day) * 0.9),
+            targets={"kcal": max(200.0, body.ceiling
+                                 / max(1, body.meals_per_day) * 0.9),
                      "protein": max(10.0, body.floor_protein
                                     / max(1, body.meals_per_day) * 1.15),
                      "fibreMin": max(2.0, body.floor_fibre
@@ -844,7 +901,7 @@ def autoplan(
             session.add(row)
             rows.append(row)
             existing.add(name)
-        session.commit()
+    session.commit()
 
     library = [_recipe_json(r) for r in rows]
 
@@ -952,6 +1009,7 @@ def _record_price(
     target.matched_name = result.get("matched_name") or ""
     target.stockcode = str(result.get("stockcode") or "")
     target.on_special = bool(result.get("on_special"))
+    target.was_price = result.get("was_price")
     if existing is None:
         session.add(target)
 
@@ -1036,6 +1094,10 @@ def refresh_prices(
             record["url"] = result["url"]
         if result.get("on_special"):
             record["onSpecial"] = True
+        # The shelf's own before-price. With one reading there is no history to
+        # compare against, and this is the store telling you outright.
+        if result.get("was_price"):
+            record["wasPrice"] = result["was_price"]
 
         if history and history[-1].get("date") == today:
             history[-1] = record  # one reading per day

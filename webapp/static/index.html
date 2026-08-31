@@ -146,6 +146,18 @@ ol.steps,ul.steps{margin:0;padding-left:20px;font-size:14px;color:var(--ink-2)}
 ol.steps li,ul.steps li{margin:0 0 5px}
 .small{font-size:12.5px}
 button.tiny{padding:3px 9px;font-size:12.5px;min-height:0}
+.was{font-size:12px;color:var(--ink-3);text-decoration:line-through}
+.ing-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+.ing-line .as-written{font-style:italic;opacity:.75}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 4px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;
+  padding:6px 12px;min-height:34px;border-radius:999px;font-weight:600;
+  background:var(--panel);color:var(--ink-2)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.chip.on .muted{color:var(--accent-ink);opacity:.75}
+tr .tag.ok{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+tr .tag.stop{background:var(--stop-soft);color:var(--stop);border-color:transparent}
+
 button.danger{color:var(--stop)}
 button.danger:hover{border-color:var(--stop)}
 
@@ -263,73 +275,7 @@ button.pick:hover{border-color:var(--accent);background:var(--accent-soft)}
 .prod-row{display:flex;gap:11px;align-items:flex-start}
 .prod-row>div{min-width:0}
 td.prod{min-width:250px}
-@media (max-width:560px){.option{border-color:var(--rule)}
-.option:hover{border-color:var(--accent)}
-.opt-letter{display:flex;align-items:center;justify-content:center;
-  width:24px;height:24px;border-radius:6px;background:var(--accent);
-  color:var(--accent-ink);font-family:"IBM Plex Mono",monospace;
-  font-weight:600;font-size:13px;flex:none}
-
-/* calendar */
-.calendar{display:grid;gap:12px;grid-template-columns:1fr}
-@media(min-width:680px){.calendar{grid-template-columns:repeat(2,1fr)}}
-@media(min-width:1000px){.calendar{grid-template-columns:repeat(3,1fr)}}
-@media(min-width:1320px){.calendar{grid-template-columns:repeat(4,1fr)}}
-.calendar .day h3{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-.calendar .day.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-button.add-day{width:100%;margin-top:8px;border-style:dashed;color:var(--ink-3)}
-button.add-day:hover{color:var(--accent);border-color:var(--accent)}
-
-/* daily goals */
-.goals-row{margin-top:12px;gap:14px;padding:10px 12px;background:var(--sunk);
-  border-radius:9px}
-.goals-row label{display:inline-flex;align-items:center;gap:5px;margin:0;
-  font-weight:400}
-.goals-row input{padding:4px 7px}
-.day-goals{display:grid;gap:7px;margin:10px 0 4px;padding-top:9px;
-  border-top:1px solid var(--hair)}
-.goal-top{display:flex;justify-content:space-between;align-items:baseline;
-  font-size:12px;color:var(--ink-3)}
-.goal-top .num{font-size:12.5px;color:var(--ink-2)}
-.goal-track{height:4px;border-radius:3px;background:var(--sunk);overflow:hidden}
-.goal-track i{display:block;height:100%;border-radius:3px;background:var(--accent)}
-.goal.miss .goal-track i{background:var(--warn)}
-.goal-note{font-size:11.5px;color:var(--ink-3);margin-top:2px}
-.goal.miss .goal-note{color:var(--warn)}
-.goal.ok .goal-note{color:var(--accent)}
-.meal.planned{padding:7px 0}
-.meal.planned label.tick{align-items:flex-start;gap:6px}
-.meal-name{flex:1;min-width:0;line-height:1.35}
-.meal-controls{display:flex;align-items:center;gap:8px;margin:4px 0 0 26px}
-.meal-controls .num{flex:1}
-.meal.off{opacity:.45}
-.meal.off span{text-decoration:line-through}
-input.mult{width:42px;padding:2px 5px;font-size:12.5px;text-align:center}
-
-/* category dots */
-.dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block;
-  background:var(--ink-3)}
-.dot.cat-chicken{background:#c8922f}
-.dot.cat-beef{background:#9c3a2c}
-.dot.cat-pork{background:#c2748c}
-.dot.cat-lamb{background:#7d5a3c}
-.dot.cat-fish{background:#3f7fa6}
-.dot.cat-vegetarian{background:#2f6b4f}
-.dot.cat-other{background:var(--ink-3)}
-
-/* cook counter */
-.counter{display:inline-flex;align-items:center;gap:6px;background:var(--sunk);
-  border-radius:999px;padding:2px 4px;font-size:12.5px;color:var(--ink-2)}
-.counter button{padding:0 7px;min-height:0;line-height:1.5}
-.counter button:disabled{opacity:.35}
-
-/* scanner */
-.scan-sheet{width:min(480px,94vw)}
-.scan-view{position:relative;border-radius:12px;overflow:hidden;background:#000;
-  aspect-ratio:4/3}
-.scan-view video{width:100%;height:100%;object-fit:cover;display:block}
-.scan-frame{position:absolute;inset:22% 12%;border:2px solid rgba(255,255,255,.9);
-  border-radius:10px;box-shadow:0 0 0 100vmax rgba(0,0,0,.35)}
+@media (max-width:560px){.option{border-color:var(--rule)}}
 /* A read is confirmed by the frame flashing, so a scan is visibly a scan even
    where the phone has vibration switched off. */
 .scan-flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
@@ -420,7 +366,7 @@ button.pick:hover{border-color:var(--accent);background:var(--accent-soft)}
 .pick-meta{display:flex;gap:4px;flex:none}
 @media(max-width:560px){.sheet{width:96vw;max-height:90vh;padding:14px}}
 
-.thumb{width:38px;height:38px}}
+@media (max-width:560px){.thumb{width:38px;height:38px}}
 .seg{display:inline-flex;border:1px solid var(--rule);border-radius:8px;overflow:hidden}
 .seg button{border:0;border-radius:0;background:var(--panel);color:var(--ink-3);
   padding:8px 14px;font-size:14px}

@@ -99,6 +99,9 @@ class PriceRecord(Base):
     matched_name: Mapped[str] = mapped_column(String(300), default="")
     stockcode: Mapped[str] = mapped_column(String(40), default="")
     on_special: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The shelf's own before-price. Kept so a first reading can still be
+    # told apart from a normal one, which history alone cannot do.
+    was_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     observed_on: Mapped[str] = mapped_column(String(10), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -223,6 +226,9 @@ class Product(Base):
     per_kg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     cup_string: Mapped[str] = mapped_column(String(80), default="")
     on_special: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The shelf's own before-price. Kept so a first reading can still be
+    # told apart from a normal one, which history alone cannot do.
+    was_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     in_stock: Mapped[bool] = mapped_column(Boolean, default=True)
     url: Mapped[str] = mapped_column(String(400), default="")
     image: Mapped[str] = mapped_column(String(400), default="")
@@ -252,6 +258,14 @@ def _migrate(connection) -> None:
         connection.execute(text(
             "ALTER TABLE products ADD COLUMN barcode VARCHAR(20) DEFAULT ''"))
         connection.commit()
+
+    for table in ("products", "price_records"):
+        rows = connection.execute(
+            text(f"PRAGMA table_info({table})")).fetchall()
+        if rows and not any(r[1] == "was_price" for r in rows):
+            connection.execute(text(
+                f"ALTER TABLE {table} ADD COLUMN was_price FLOAT"))
+            connection.commit()
 
 
 def init_db() -> None:

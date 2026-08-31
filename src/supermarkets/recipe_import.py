@@ -171,19 +171,56 @@ def _round_nicely(value: float):
     return int(out) if float(out).is_integer() else out
 
 
+# Spoons and cups are how recipes are written in both systems, so they are not
+# converted -- only scaled. Turning "1 1/2 tsp salt" into "9 g salt" is
+# technically a conversion and practically useless: nobody weighs salt.
+_COOKS_UNITS = {
+    "cup", "cups", "c", "tablespoon", "tablespoons", "tbsp", "tbs",
+    "teaspoon", "teaspoons", "tsp", "pinch", "pinches", "handful",
+}
+
+# Units a cook says out loud, in the singular, keyed by what recipes write.
+_UNIT_LABEL = {
+    "c": "cups", "tbs": "tbsp", "tablespoon": "tbsp", "tablespoons": "tbsp",
+    "teaspoon": "tsp", "teaspoons": "tsp",
+}
+
+
 def present(part: Dict[str, Any], system: str = "metric",
             scale: float = 1.0) -> str:
-    """One ingredient line, scaled and in the requested measuring system."""
+    """One ingredient line, scaled, in the measure the recipe used.
+
+    The old rule was "if we can work out the grams, say grams", which turned
+    "2 cups buttermilk" into "455 g buttermilk" and "1 1/2 tsp baking soda"
+    into nothing at all. Both are worse than what the recipe said, and the
+    gram figure is our own conversion rather than the writer's -- a cup of
+    flour is 265g by the table here and 300g by some recipes, so the number
+    quietly disagreed with the page it came from.
+
+    So: keep the kind of measure the line was written in, and scale it. Grams
+    and millilitres are still worked out, and are offered alongside by
+    `equivalent()` for shopping, where they genuinely help.
+    """
     qty = part.get("quantity")
     if qty is None:
         return part["original"]
 
+    item = part["item"]
+    unit = (part.get("unit") or "").lower()
+
+    # Cups and spoons: the same words in both systems. Scale, do not convert.
+    if unit in _COOKS_UNITS:
+        scaled_qty = qty * scale
+        amount = _round_spoons(scaled_qty)
+        label = _plural(_UNIT_LABEL.get(unit, unit), scaled_qty)
+        return f"{amount} {label} {item}".strip()
+
     grams = part.get("grams")
     millilitres = part.get("millilitres")
-    item = part["item"]
+    by_weight = unit in _WEIGHT_G
 
     if system == "imperial":
-        if grams:
+        if by_weight and grams:
             value = grams * scale
             if value >= 453.6:
                 return f"{_round_nicely(value / 453.6)} lb {item}"
@@ -195,8 +232,13 @@ def present(part: Dict[str, Any], system: str = "metric",
             if value >= 29:
                 return f"{_round_nicely(value / 29.57)} fl oz {item}"
             return f"{_round_nicely(value / 14.79)} tbsp {item}"
-    else:
         if grams:
+            value = grams * scale
+            if value >= 453.6:
+                return f"{_round_nicely(value / 453.6)} lb {item}"
+            return f"{_round_nicely(value / 28.35)} oz {item}"
+    else:
+        if by_weight and grams:
             value = grams * scale
             if value >= 1000:
                 return f"{_round_nicely(value / 1000)} kg {item}"
@@ -206,10 +248,86 @@ def present(part: Dict[str, Any], system: str = "metric",
             if value >= 1000:
                 return f"{_round_nicely(value / 1000)} L {item}"
             return f"{_round_nicely(value)} ml {item}"
+        if grams:
+            value = grams * scale
+            if value >= 1000:
+                return f"{_round_nicely(value / 1000)} kg {item}"
+            return f"{_round_nicely(value)} g {item}"
 
+    # No unit at all: "2 eggs", "1 lemon".
     scaled = _round_nicely(qty * scale)
-    unit = f" {part['unit']}" if part.get("unit") else ""
-    return f"{scaled}{unit} {item}".strip()
+    suffix = f" {part['unit']}" if part.get("unit") else ""
+    return f"{scaled}{suffix} {item}".strip()
+
+
+def equivalent(part: Dict[str, Any], scale: float = 1.0) -> str:
+    """What that line weighs or measures, where it is worth saying.
+
+    Useful for a shopping list and for a cook with scales, and pointless
+    alongside a line that already gives grams. Marked as an approximation
+    because it is one -- these come from a density table, not from the recipe.
+    """
+    unit = (part.get("unit") or "").lower()
+    if unit not in _COOKS_UNITS:
+        return ""            # the line already says grams or millilitres
+    item = (part.get("item") or "").lower()
+    millilitres = part.get("millilitres")
+    grams = part.get("grams")
+    # A cup of flour is worth knowing in grams; a cup of buttermilk is worth
+    # knowing in millilitres. Weighing a liquid is nobody's idea of a help.
+    liquid = any(word in item for word in _LIQUIDS)
+    if liquid and millilitres and millilitres * scale >= 15:
+        return f"about {_round_nicely(millilitres * scale)} ml"
+    if grams and grams * scale >= 10:
+        return f"about {_round_nicely(grams * scale)} g"
+    if millilitres and millilitres * scale >= 15:
+        return f"about {_round_nicely(millilitres * scale)} ml"
+    return ""
+
+
+# How a measuring cup is actually marked, and how a recipe actually reads.
+_EIGHTHS = {1: "1/8", 2: "1/4", 3: "3/8", 4: "1/2", 5: "5/8", 6: "3/4",
+            7: "7/8"}
+
+
+def _round_spoons(value: float) -> str:
+    """A spoon or cup amount as a cook would write it.
+
+    "1.75 cups" is a number a computer produced. A recipe says 1 3/4, and a
+    measuring cup has the line for it.
+    """
+    if value >= 10:
+        return str(_round_nicely(value))
+    if value <= 0:
+        return "a pinch of"
+    whole = int(value)
+    rest = value - whole
+    # Thirds are marked on cups and spoons and are not eighths, so they are
+    # checked before the eighths that would otherwise swallow them.
+    if abs(rest - 1 / 3) < 0.04:
+        fraction = "1/3"
+    elif abs(rest - 2 / 3) < 0.04:
+        fraction = "2/3"
+    else:
+        eighths = round(rest * 8)
+        if eighths == 8:
+            whole, eighths = whole + 1, 0
+        fraction = _EIGHTHS.get(eighths, "")
+    if not fraction:
+        return str(whole) if whole else "a pinch of"
+    return f"{whole} {fraction}" if whole else fraction
+
+
+def _plural(unit: str, value: float) -> str:
+    """"1 cup" and "3/4 cup", not "1 cups"."""
+    return "cup" if (unit == "cups" and value <= 1.0) else unit
+
+
+# Things measured in cups whose useful equivalent is a volume, not a weight.
+_LIQUIDS = (
+    "milk", "buttermilk", "water", "oil", "juice", "cream", "stock", "broth",
+    "wine", "vinegar", "yoghurt", "yogurt", "sauce", "passata", "puree",
+)
 
 
 # ------------------------------------------------------------ extraction ---
@@ -365,4 +483,13 @@ def scale_recipe(recipe: Dict[str, Any], servings: Optional[int] = None,
         "system": system,
         "lines": [present(part, system, factor)
                   for part in recipe.get("ingredients", [])],
+        # What each line weighs, where the line is in cups or spoons and the
+        # answer is worth having. Kept separate from the line itself so the
+        # page can show it quietly rather than in place of the measure.
+        "equivalents": [equivalent(part, factor)
+                        for part in recipe.get("ingredients", [])],
+        # What the page itself said, which is the authority when our own
+        # conversion disagrees with it.
+        "original": [part.get("original", "")
+                     for part in recipe.get("ingredients", [])],
     }

@@ -212,6 +212,7 @@ function render() {
   if (state.tab === 'search') wireSearch();
   if (state.tab === 'shop') wireShop();
   if (state.tab === 'data') wireData();
+  if (state.tab === 'prices') wirePrices();
   if (state.tab === 'build') { wireBuild(); wireBook(); }
   if (state.tab === 'week') { wireAuto(); wireWeek(); }
   if (state.tab === 'recipes') wireRecipes();
@@ -556,7 +557,7 @@ function recipeCard(r, opts) {
     const tot = i.gramsTotal != null
       ? `<span class="muted"> (${i.gramsTotal} g total)</span>` : '';
     const food = i.food || i.name || '';
-    return `<div class="meal ing-row">${foodPhoto(food, 'small')}
+    return `<div class="meal ing-row">${foodPhoto(food, 'small', i.image)}
       <span class="ing-name">${esc(food)}</span>
       <span class="num">${esc(per)}</span>${tot}</div>`;
   }).join('');
@@ -620,6 +621,16 @@ function recipeCard(r, opts) {
     ${controls ? `<div class="recipe-foot">${controls}</div>` : ''}</div>`;
 }
 
+const libView = { q: '', meal: '', cat: '', sort: 'best' };
+
+const LIB_SORTS = [
+  { id: 'best', label: 'Best rated first' },
+  { id: 'name', label: 'Name, A to Z' },
+  { id: 'cooked', label: 'Most cooked' },
+  { id: 'kcal', label: 'Fewest calories' },
+  { id: 'protein', label: 'Most protein' },
+];
+
 function viewRecipes() {
   const list = state.recipes || [];
   if (!list.length) {
@@ -627,15 +638,95 @@ function viewRecipes() {
       <p class="sub">Build some in the Recipe builder, then choose
         &ldquo;Save to library&rdquo;. Rated recipes sort to the top here.</p></div>`;
   }
-  const rated = list.filter((r) => r.rating).length;
+
+  const needle = libView.q.trim().toLowerCase();
+  const shown = list.filter((r) => {
+    if (libView.meal && !(r.meals || (r.meal ? [r.meal] : ['lunch', 'dinner']))
+      .includes(libView.meal)) return false;
+    if (libView.cat && categoryOf(r) !== libView.cat) return false;
+    if (!needle) return true;
+    // Searching the ingredients too, because "what can I do with the mince in
+    // the fridge" is the question a library actually gets asked.
+    return r.name.toLowerCase().includes(needle)
+      || (r.ingredients || []).some((i) =>
+        String(i.food || '').toLowerCase().includes(needle));
+  });
+
+  const per = (r) => r.perServing || {};
+  const byName = (a, b) => a.name.localeCompare(b.name, undefined,
+    { sensitivity: 'base' });
+  const sorters = {
+    best: (a, b) => (b.rating || 0) - (a.rating || 0)
+      || (b.timesCooked || 0) - (a.timesCooked || 0) || byName(a, b),
+    name: byName,
+    cooked: (a, b) => (b.timesCooked || 0) - (a.timesCooked || 0) || byName(a, b),
+    kcal: (a, b) => (per(a).kcal || 0) - (per(b).kcal || 0) || byName(a, b),
+    protein: (a, b) => (per(b).p || 0) - (per(a).p || 0) || byName(a, b),
+  };
+  shown.sort(sorters[libView.sort] || sorters.best);
+
+  const counts = {};
+  CAT_ORDER.forEach((c) => { counts[c] = list.filter(
+    (r) => categoryOf(r) === c).length; });
+
   return `<div class="card">
     <h2>Recipe library</h2>
-    <p class="sub">${list.length} saved, ${rated} rated. Best first.</p>
-    <div class="grid g2">${list.map((r) => recipeCard(r, { library: true })).join('')}</div>
+    <p class="sub">${list.length} saved${
+      shown.length !== list.length ? `, ${shown.length} shown` : ''}.</p>
+    <div class="row">
+      <div style="flex:2;min-width:170px">
+        <label for="libFind">Search</label>
+        <input id="libFind" type="search" value="${esc(libView.q)}"
+          placeholder="name or ingredient" autocomplete="off"></div>
+      <div style="flex:1;min-width:130px">
+        <label for="libMeal">Meal</label>
+        <select id="libMeal">${optionsFor(MEALS, libView.meal)}</select></div>
+      <div style="flex:1;min-width:130px">
+        <label for="libSort">Order</label>
+        <select id="libSort">${optionsFor(LIB_SORTS, libView.sort)}</select></div>
+    </div>
+    <div class="chips">
+      <button class="chip${libView.cat ? '' : ' on'}" data-libcat="">All</button>
+      ${CAT_ORDER.filter((c) => counts[c]).map((c) =>
+        `<button class="chip${libView.cat === c ? ' on' : ''}" data-libcat="${esc(c)}">
+          <span class="dot cat-${esc(c)}"></span>${esc(CAT_LABEL[c])}
+          <span class="muted">${counts[c]}</span></button>`).join('')}
+    </div>
+    ${shown.length
+      ? `<div class="grid g2">${shown.map(
+          (r) => recipeCard(r, { library: true })).join('')}</div>`
+      : '<p class="muted">Nothing matches those filters.</p>'}
   </div>`;
 }
 
 function wireRecipes() {
+  const find = $('libFind');
+  if (find) find.addEventListener('input', () => {
+    libView.q = find.value;
+    render();
+    const again = $('libFind');
+    if (again) {
+      again.focus();
+      again.setSelectionRange(again.value.length, again.value.length);
+    }
+  });
+  const meal = $('libMeal');
+  if (meal) meal.addEventListener('change', () => {
+    libView.meal = meal.value;
+    render();
+  });
+  const sort = $('libSort');
+  if (sort) sort.addEventListener('change', () => {
+    libView.sort = sort.value;
+    render();
+  });
+  document.querySelectorAll('[data-libcat]').forEach((b) => {
+    b.addEventListener('click', () => {
+      libView.cat = b.dataset.libcat;
+      render();
+    });
+  });
+
   document.querySelectorAll('[data-rate]').forEach((b) => {
     b.addEventListener('click', async () => {
       const id = Number(b.dataset.rate);
@@ -951,7 +1042,8 @@ function viewShop() {
   return `<div class="card">
     <div class="row" style="margin-bottom:12px">
       <div style="flex:1"><h2>Shopping list</h2>
-        <p class="sub" style="margin:0">${got.size} of ${entries.length} in the basket</p></div>
+        <p class="sub" id="basketCount" style="margin:0">${got.size} of ${
+          entries.length} in the basket</p></div>
       <button id="refreshBtn" class="primary">Refresh prices</button>
       <button id="saveList">Save this list</button>
       <button id="clearGot" class="ghost">Untick all</button>
@@ -1081,13 +1173,21 @@ function wireShop() {
       const got = gotSet();
       if (box.checked) got.add(food); else got.delete(food);
       state.plan.data.got = [...got];
-      // Repaint the row immediately; the save follows without blocking it.
+      // Repaint the row and the count first; the save follows.
       const row = box.closest('tr');
       if (row) row.classList.toggle('got', box.checked);
-      await savePlan();
-      const head = document.querySelector('.card .sub');
+      // By id, not by `.card .sub`. The sign-in card stays in the document
+      // after you sign in, so the first `.card .sub` on the page is its
+      // subtitle -- the count was being written into a hidden element while
+      // the real one sat at "0 of 17" however many things you ticked.
+      const head = $('basketCount');
       if (head) head.textContent =
         `${got.size} of ${Object.keys(state.plan.data.shop || {}).length} in the basket`;
+      try {
+        await savePlan();
+      } catch (err) {
+        toast('That tick did not save: ' + err.message);
+      }
     });
   });
 
@@ -1198,9 +1298,23 @@ function sparkline(points, width, height) {
 // Is today's price actually good? Compare against the readings before it, not
 // against the all-time low -- "cheapest ever" is rare and unhelpful, "cheaper
 // than usual" is what decides whether to buy this week.
-function dealVerdict(points) {
+function dealVerdict(points, last) {
+  // With one reading there is nothing to compare against -- except the shelf
+  // itself, which says outright when a price is a markdown. That covers the
+  // first weeks, when the history is too short to say anything.
   if (!points || points.length < 2) {
-    return { label: 'no history yet', cls: '', detail: 'Refresh again next week.' };
+    if (last && last.wasPrice && last.price && last.wasPrice > last.price) {
+      const off = (last.wasPrice - last.price) / last.wasPrice * 100;
+      return { label: 'on special', cls: 'ok',
+               detail: `${off.toFixed(0)}% off its usual ${money(last.wasPrice)}.`,
+               rank: 1 };
+    }
+    if (last && last.onSpecial) {
+      return { label: 'on special', cls: 'ok',
+               detail: 'Marked down at the store.', rank: 1 };
+    }
+    return { label: 'no history yet', cls: '',
+             detail: 'Refresh again next week.', rank: 5 };
   }
   const now = points[points.length - 1].v;
   const prior = points.slice(0, -1).map((p) => p.v);
@@ -1210,70 +1324,140 @@ function dealVerdict(points) {
   const delta = (now - mean) / mean * 100;
 
   if (now <= lo) {
-    return { label: 'cheapest yet', cls: 'ok',
+    return { rank: 0, label: 'cheapest yet', cls: 'ok',
              detail: `Lowest of ${points.length} readings.` };
   }
   if (delta <= -8) {
-    return { label: 'good week to buy', cls: 'ok',
+    return { rank: 1, label: 'good week to buy', cls: 'ok',
              detail: `${Math.abs(delta).toFixed(0)}% below its usual ${money(mean)}/kg.` };
   }
   if (delta >= 8) {
-    return { label: 'dearer than usual', cls: 'stop',
+    return { rank: 6, label: 'dearer than usual', cls: 'stop',
              detail: `${delta.toFixed(0)}% above its usual ${money(mean)}/kg.` };
   }
   if (now >= hi) {
-    return { label: 'highest yet', cls: 'stop',
+    return { rank: 7, label: 'highest yet', cls: 'stop',
              detail: `Dearest of ${points.length} readings.` };
   }
-  return { label: 'about normal', cls: '',
+  return { rank: 4, label: 'about normal', cls: '',
            detail: `Usual price is around ${money(mean)}/kg.` };
 }
 
+const priceView = { q: '', sort: 'name' };
+
+const PRICE_SORTS = [
+  { id: 'name', label: 'Name, A to Z' },
+  { id: 'deal', label: 'Best buys first' },
+  { id: 'change', label: 'Biggest change' },
+  { id: 'dear', label: 'Dearest per kilo' },
+  { id: 'cheap', label: 'Cheapest per kilo' },
+  { id: 'readings', label: 'Most readings' },
+];
+
 function viewPrices() {
   const prices = state.plan.data.prices || {};
-  const entries = Object.entries(prices).filter(([, h]) => h && h.length);
-  if (!entries.length) {
+  const all = Object.entries(prices).filter(([, h]) => h && h.length);
+  if (!all.length) {
     return `<div class="card"><h2>No prices yet</h2>
       <p class="sub">Use &ldquo;Refresh prices&rdquo; on the shopping list.
         Each refresh adds a reading, and the trend appears once there are two.</p></div>`;
   }
 
-  const rows = entries.map(([food, history]) => {
-    const points = history
-      .map((e) => ({ v: perKg(e), d: e.date }))
+  // Everything a row needs, worked out once so the sort can use it too.
+  const rows = all.map(([food, history]) => {
+    const points = history.map((e) => ({ v: perKg(e), d: e.date }))
       .filter((p) => p.v);
+    const last = history[history.length - 1];
     const now = points.length ? points[points.length - 1].v : null;
     const before = points.length > 1 ? points[points.length - 2].v : null;
-    const verdict = dealVerdict(points);
-    const last = history[history.length - 1];
+    const change = (now && before) ? (now - before) / before : 0;
+    return { food, history, points, last, now, before, change,
+             verdict: dealVerdict(points, last) };
+  });
 
-    return `<tr>
-      <td><b>${esc(food)}</b>
-        <div class="muted small">${esc(last.matched || last.store || '')}
-          ${last.source === 'manual' ? '<span class="tag">by hand</span>' : ''}</div></td>
-      <td class="r num">${now ? money(now) + '/kg' : '&mdash;'}</td>
-      ${deltaCell(now, before)}
-      <td class="spark-cell">${sparkline(points)}</td>
-      <td><span class="tag ${verdict.cls}">${verdict.label}</span>
-        <div class="muted small">${verdict.detail}</div></td>
-      <td class="r muted num small">${points.length}</td>
-    </tr>`;
-  }).join('');
+  const needle = priceView.q.trim().toLowerCase();
+  const shown = needle
+    ? rows.filter((r) => r.food.toLowerCase().includes(needle)
+        || String(r.last.matched || '').toLowerCase().includes(needle)
+        || String(r.last.store || '').toLowerCase().includes(needle))
+    : rows.slice();
 
-  const good = entries.filter(([, h]) => {
-    const pts = h.map((e) => ({ v: perKg(e) })).filter((p) => p.v);
-    return ['cheapest yet', 'good week to buy'].includes(dealVerdict(pts).label);
-  }).length;
+  const byName = (a, b) => a.food.localeCompare(b.food, undefined,
+    { sensitivity: 'base' });
+  const sorters = {
+    // Alphabetical by default. A price list is something you look a thing up
+    // in, and a list in whatever order it was written is not lookupable.
+    name: byName,
+    deal: (a, b) => (a.verdict.rank - b.verdict.rank) || byName(a, b),
+    change: (a, b) => Math.abs(b.change) - Math.abs(a.change) || byName(a, b),
+    dear: (a, b) => (b.now || 0) - (a.now || 0) || byName(a, b),
+    cheap: (a, b) => (a.now || Infinity) - (b.now || Infinity) || byName(a, b),
+    readings: (a, b) => b.points.length - a.points.length || byName(a, b),
+  };
+  shown.sort(sorters[priceView.sort] || byName);
+
+  const body = shown.map((r) => `<tr>
+      <td><b>${esc(r.food)}</b>
+        <div class="muted small">${esc(r.last.matched || r.last.store || '')}
+          ${r.last.source === 'manual' ? '<span class="tag">by hand</span>' : ''}</div></td>
+      <td class="r num" data-label="Now">${r.now ? money(r.now) + '/kg' : '&mdash;'}
+        ${r.last.wasPrice && r.last.price && r.last.wasPrice > r.last.price
+          ? `<div class="was num">was ${money(r.last.wasPrice)}</div>` : ''}</td>
+      ${deltaCell(r.now, r.before)}
+      <td class="spark-cell">${sparkline(r.points)}</td>
+      <td data-label="Verdict"><span class="tag ${r.verdict.cls}">${
+        esc(r.verdict.label)}</span>
+        <div class="muted small">${esc(r.verdict.detail)}</div></td>
+      <td class="r muted num small" data-label="Readings">${r.points.length}</td>
+    </tr>`).join('');
+
+  const good = rows.filter((r) => r.verdict.rank <= 1).length;
 
   return `<div class="card">
-    <h2>Prices over time</h2>
-    <p class="sub">${entries.length} foods tracked${
-      good ? `, <b>${good}</b> worth buying this week` : ''}.
-      The dot on the line is the cheapest reading; the dark dot is now.</p>
-    <div class="scroll"><table>
+    <div class="row" style="align-items:baseline">
+      <div style="flex:1;min-width:0">
+        <h2 style="margin:0">Prices over time</h2>
+        <p class="sub" style="margin:4px 0 0">${all.length} foods tracked${
+          good ? `, <b>${good}</b> worth buying this week` : ''}.
+          The dot on the line is the cheapest reading; the dark dot is now.</p>
+      </div>
+    </div>
+    <div class="row" style="margin:14px 0 4px">
+      <div style="flex:2;min-width:170px">
+        <label for="priceFind">Find a food</label>
+        <input id="priceFind" type="search" placeholder="type to filter"
+          value="${esc(priceView.q)}" autocomplete="off"></div>
+      <div style="flex:1;min-width:150px">
+        <label for="priceSort">Order</label>
+        <select id="priceSort">${optionsFor(PRICE_SORTS, priceView.sort)}</select></div>
+    </div>
+    <p class="muted small" style="margin:0 0 10px">${
+      needle ? `${shown.length} of ${all.length} shown.` : ''}</p>
+    ${shown.length ? `<div class="scroll"><table>
       <thead><tr><th>Food</th><th class="r">Now</th><th class="r">Change</th>
         <th>Trend</th><th>Verdict</th><th class="r">Readings</th></tr></thead>
-      <tbody>${rows}</tbody></table></div></div>`;
+      <tbody>${body}</tbody></table></div>`
+      : `<p class="muted">Nothing matches &ldquo;${esc(priceView.q)}&rdquo;.</p>`}
+    </div>`;
+}
+
+function wirePrices() {
+  const find = $('priceFind');
+  if (find) {
+    find.addEventListener('input', () => {
+      priceView.q = find.value;
+      render();
+      // Repainting replaces the field, so put the cursor back where it was.
+      const again = $('priceFind');
+      if (again) { again.focus(); again.setSelectionRange(again.value.length,
+        again.value.length); }
+    });
+  }
+  const sort = $('priceSort');
+  if (sort) sort.addEventListener('change', () => {
+    priceView.sort = sort.value;
+    render();
+  });
 }
 
 
@@ -1867,6 +2051,9 @@ function wireWeek() {
       try {
         const res = await api('/plans/' + state.planId + '/undo', { method: 'POST' });
         await loadPlan();
+        // Same reason as clearing: the report describes a week that has just
+        // been replaced by an older one.
+        auto.result = null;
         render();
         const out = $('weekOut');
         if (out) {
@@ -1886,7 +2073,16 @@ function wireWeek() {
     clear.addEventListener('click', async () => {
       if (!window.confirm('Clear every day of this week?')) return;
       state.plan.data.week = DAYS.map((name) => ({ day: name, meals: [] }));
-      await savePlan();
+      // The planner's report describes a week that no longer exists. Leaving
+      // it on screen listing all seven days is why clearing looked as though
+      // it had done nothing at all.
+      auto.result = null;
+      try {
+        await savePlan();
+        toast('Week cleared. Undo is on the Data tab.');
+      } catch (err) {
+        toast(err.message);
+      }
       render();
     });
   }
@@ -2119,7 +2315,20 @@ function renderFound() {
     </div>
 
     <h4 style="margin:16px 0 6px">Ingredients</h4>
-    ${(r.lines || []).map((l) => `<div class="meal">${esc(l)}</div>`).join('')}
+    ${(r.lines || []).map((l, i) => {
+      const eq = (r.equivalents || [])[i];
+      const orig = (r.original || [])[i];
+      // The page's own wording is the authority. Ours agrees with it at the
+      // published serving count and has to differ once it is scaled, so show
+      // both rather than quietly replacing one with the other.
+      const differs = orig && orig.trim() !== l.trim();
+      return `<div class="meal ing-line">
+        <span>${esc(l)}</span>
+        ${eq ? `<span class="muted small">${esc(eq)}</span>` : ''}
+        ${differs ? `<span class="muted small as-written"
+          title="What the page says">page: ${esc(orig)}</span>` : ''}
+      </div>`;
+    }).join('')}
 
     ${(r.steps || []).length ? `<h4 style="margin:16px 0 6px">Method</h4>
       <ol class="steps">${r.steps.map((st) => `<li>${esc(st)}</li>`).join('')}</ol>
@@ -2685,8 +2894,10 @@ function shortFood(name) {
   return String(name || '').split(',')[0];
 }
 
-function foodPhoto(name, cls) {
-  const src = photos.map[name];
+function foodPhoto(name, cls, fallbackSrc) {
+  // A written-your-own recipe names store products, which the photo map has
+  // never heard of. It carries its own picture instead.
+  const src = photos.map[name] || fallbackSrc;
   const label = shortFood(name);
   if (!src) {
     return `<span class="food-pic none ${cls || ''}" aria-hidden="true"
@@ -2705,7 +2916,7 @@ function mealThumb(r) {
   const items = (r.ingredients || []);
   const lead = items.find((i) => i.role === 'protein')
     || items.find((i) => i.role === 'base');
-  return lead ? foodPhoto(lead.food, 'tiny') : '';
+  return lead ? foodPhoto(lead.food, 'tiny', lead.image) : '';
 }
 
 
@@ -2724,7 +2935,7 @@ function recipeStrip(r) {
 
   return `<div class="recipe-strip">${wanted.map((i) => `
     <figure class="strip-cell">
-      ${foodPhoto(i.food, 'big')}
+      ${foodPhoto(i.food, 'big', i.image)}
       <figcaption>${esc(shortFood(i.food))}</figcaption>
     </figure>`).join('')}</div>`;
 }
@@ -2803,7 +3014,7 @@ function bookTile(r) {
   return `<article class="book-tile">
     <div class="tile-pics">${(r.ingredients || [])
       .filter((i) => i.role === 'protein' || i.role === 'base' || i.role === 'veg')
-      .slice(0, 3).map((i) => foodPhoto(i.food, 'tile')).join('')}</div>
+      .slice(0, 3).map((i) => foodPhoto(i.food, 'tile', i.image)).join('')}</div>
     <div class="tile-body">
       <div class="row" style="gap:6px;align-items:flex-start">
         <span class="dot cat-${esc(cat)}" style="margin-top:5px"></span>
@@ -2993,7 +3204,10 @@ function autoSummary(res) {
     </div>`;
   }).join('');
 
-  return `<p class="note">${esc(res.message || '')}</p>
+  return `<div class="row" style="align-items:baseline;margin-bottom:6px">
+      <h4 style="margin:0;flex:1">What it planned</h4>
+      <button class="ghost tiny" id="aDismiss">Hide this</button></div>
+    <p class="note">${esc(res.message || '')}</p>
     <div class="auto-days">${rows}</div>`;
 }
 
@@ -3003,6 +3217,11 @@ function wireAuto() {
     open.textContent = auto.show ? 'Hide the planner' : 'Plan it for me';
     open.addEventListener('click', () => { auto.show = !auto.show; render(); });
   }
+  const dismiss = $('aDismiss');
+  if (dismiss) dismiss.addEventListener('click', () => {
+    auto.result = null;
+    render();
+  });
   const go = $('aGo');
   if (!go) return;
   go.addEventListener('click', async () => {
@@ -3055,6 +3274,23 @@ function ownMacros() {
   };
 }
 
+// Where a line's figures came from. An estimate is honest and useful; silence
+// is not, and silence is what produced a recipe reading 0 kcal.
+function nutritionSource(item) {
+  if (!item.per100) {
+    return `<span class="tag stop">no nutrition</span>
+      <span class="muted small">Enter it by hand, or this adds nothing to
+        the totals.</span>`;
+  }
+  if (item.per100From === 'estimate') {
+    return `<span class="tag">estimated</span>
+      <span class="muted small">from ${esc(item.per100Name || 'a similar food')}</span>`;
+  }
+  if (item.per100From === 'typed') return '<span class="tag">entered by hand</span>';
+  return '<span class="tag ok">from the label</span>';
+}
+
+
 function ownCost() {
   // Only counts lines with a known price, and says how many it could not.
   let cost = 0;
@@ -3071,28 +3307,37 @@ function viewOwn() {
   const per = m.perServing;
 
   const rows = own.items.map((i, idx) => `<tr>
-    <td>${thumb({ image: i.image, name: i.food })
-      ? `<div class="prod-row">${thumb({ image: i.image, name: i.food })}
-         <div style="min-width:0"><b>${esc(i.food)}</b>
-         <div class="muted small">${esc(i.matched || 'no product matched')}</div></div></div>`
-      : esc(i.food)}</td>
+    <td><div class="prod-row">${thumb({ image: i.image, name: i.food })}
+      <div style="min-width:0"><b>${esc(i.food)}</b>
+        <div class="muted small">${esc(i.matched || 'no product matched')}</div>
+        ${nutritionSource(i)}</div></div></td>
     <td class="r" data-label="Grams">
       <input type="number" class="mult" style="width:74px" data-grams="${idx}"
         value="${i.grams}" min="1" max="20000"> g</td>
     <td class="r num" data-label="Energy">${i.per100
-      ? Math.round((i.per100.kcal || 0) * i.grams / 100) + ' kcal' : '&mdash;'}</td>
+      ? Math.round((i.per100.kcal || 0) * i.grams / 100) + ' kcal'
+      : '<span class="muted small">not known</span>'}</td>
     <td class="r num" data-label="Protein">${i.per100
-      ? Math.round((i.per100.p || 0) * i.grams / 100) + ' g' : '&mdash;'}</td>
+      ? Math.round((i.per100.p || 0) * i.grams / 100) + ' g'
+      : '<span class="muted small">&mdash;</span>'}</td>
     <td class="r num" data-label="Cost">${i.perKg
       ? money(i.perKg * i.grams / 1000) : '&mdash;'}</td>
     <td class="r"><button class="ghost tiny" data-rmitem="${idx}"
       title="Remove">&times;</button></td>
   </tr>`).join('');
 
+  const unknown = own.items.filter((i) => !i.per100).length;
+
   return `<div class="card">
     <h2>Write your own recipe</h2>
-    <p class="sub">Search a product to add it. Nutrition and price come from
-      the catalogue, so the totals below are real rather than estimated.</p>
+    <p class="sub">Search a product to add it. Figures come from the label
+      where the store has one, and from the ingredient table where it does
+      not.</p>
+    ${unknown ? `<div class="warn">${unknown} ingredient${
+      unknown === 1 ? ' has' : 's have'} no nutrition, so ${
+      unknown === 1 ? 'it is' : 'they are'} missing from the totals below.
+      Add the figures by hand to include ${unknown === 1 ? 'it' : 'them'}.</div>`
+      : ''}
 
     <div class="grid g2">
       <div><label for="ownName">Name</label>
@@ -3199,10 +3444,18 @@ function ownManualHtml(q) {
       Add "${esc(q)}" by hand instead</summary>
     <div class="row" style="margin-top:8px">
       <input id="ownManualName" value="${esc(q)}" placeholder="Name" style="flex:1">
-      <input id="ownManualKcal" type="number" placeholder="kcal/100g" style="width:110px">
-      <input id="ownManualP" type="number" placeholder="protein/100g" style="width:120px">
       <button id="ownManualAdd" class="tiny">Add</button>
-    </div></details>`;
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="ownManualKcal" type="number" placeholder="kcal/100g" style="flex:1;min-width:92px">
+      <input id="ownManualP" type="number" placeholder="protein" style="flex:1;min-width:80px">
+      <input id="ownManualC" type="number" placeholder="carbs" style="flex:1;min-width:74px">
+      <input id="ownManualF" type="number" placeholder="fat" style="flex:1;min-width:66px">
+      <input id="ownManualFb" type="number" placeholder="fibre" style="flex:1;min-width:74px">
+    </div>
+    <p class="muted small" style="margin:6px 0 0">All per 100g. Leave them
+      blank and it will estimate from a similar food.</p>
+    </details>`;
 }
 
 function wireOwnManual() {
@@ -3211,15 +3464,52 @@ function wireOwnManual() {
   add.addEventListener('click', async () => {
     const name = ($('ownManualName').value || '').trim();
     if (!name) return;
+    const typed = {
+      kcal: Number($('ownManualKcal').value) || 0,
+      p: Number($('ownManualP').value) || 0,
+      c: Number(($('ownManualC') || {}).value) || 0,
+      f: Number(($('ownManualF') || {}).value) || 0,
+      fb: Number(($('ownManualFb') || {}).value) || 0,
+    };
+    // Nothing typed at all is a request for a guess, not a request for zero.
+    const blank = !Object.values(typed).some((v) => v);
+    const found = blank ? await nutritionFor({ name }) : null;
     own.items.push({
       food: name, grams: 100, image: '', matched: 'entered by hand',
-      per100: { kcal: Number($('ownManualKcal').value) || 0,
-                p: Number($('ownManualP').value) || 0, c: 0, f: 0, fb: 0 },
+      per100: blank ? found.per100 : typed,
+      per100From: blank ? found.from : 'typed',
+      per100Name: blank ? found.name : '',
       perKg: null, store: '', stockcode: '',
     });
     render();
   });
 }
+
+// Store listings carry no nutrition panel. Open Food Facts has one but only
+// answers to a barcode, and often has never seen an Australian store line --
+// which is how a written-your-own recipe ended up in the week reading 0 kcal.
+// Fall back to the ingredient table, which knows what chicken breast is
+// whether or not anyone has scanned that particular packet.
+async function nutritionFor(product) {
+  if (product.barcode) {
+    try {
+      const res = await api('/barcode/' + encodeURIComponent(product.barcode));
+      const n = res.nutrition && res.nutrition.nutrition;
+      if (n && n.kcal != null) {
+        return { per100: n, from: 'label', name: '' };
+      }
+    } catch (_) { /* fall through to the estimate */ }
+  }
+  try {
+    const res = await api('/nutrition/estimate?name='
+      + encodeURIComponent(product.name || ''));
+    if (res.status === 'ok') {
+      return { per100: res.per100, from: 'estimate', name: res.matched };
+    }
+  } catch (_) { /* nothing known, and the row will say so */ }
+  return { per100: null, from: 'none', name: '' };
+}
+
 
 function wireOwnPick() {
   document.querySelectorAll('[data-pick-ing]').forEach((b) => {
@@ -3228,19 +3518,11 @@ function wireOwnPick() {
       if (!p) return;
       b.disabled = true;
       b.textContent = 'Adding…';
-      // Nutrition is not in the store listing, so ask the barcode lookup,
-      // which reaches Open Food Facts for the panel.
-      let per100 = null;
-      if (p.barcode) {
-        try {
-          const scanRes = await api('/barcode/' + encodeURIComponent(p.barcode));
-          const n = scanRes.nutrition && scanRes.nutrition.nutrition;
-          if (n && n.kcal != null) per100 = n;
-        } catch (_) { /* no nutrition is survivable */ }
-      }
+      const found = await nutritionFor(p);
       own.items.push({
         food: p.name, grams: p.pack_g || 100, image: p.image || '',
-        matched: p.package_size || '', per100,
+        matched: p.package_size || '',
+        per100: found.per100, per100From: found.from, per100Name: found.name,
         perKg: p.per_kg || null, store: p.store || '',
         stockcode: String(p.stockcode || ''),
       });
@@ -3338,6 +3620,12 @@ function wireOwn() {
                 pack: null,
                 aisle: guessAisle(i.food),
                 role: 'other',
+                // Without these the saved recipe had no picture -- the photo
+                // map only knows the builder's own ingredient names, and a
+                // store product is not one of them -- and no way to be
+                // recalculated later.
+                image: i.image || '',
+                per100: i.per100 || null,
               })),
               steps: own.steps.filter((x) => x.trim()),
               storage: '',

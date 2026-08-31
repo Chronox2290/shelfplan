@@ -1325,3 +1325,105 @@ lists live in the plan itself rather than in one browser, so they survive an
 export and travel to another device. Restoring merges prices rather than
 replacing them -- a price recorded since is newer than the one saved with the
 list. Both are undoable from the Data tab.
+
+## Sixty rules that never applied
+
+The ingredient photographs, the recipe book grid, the scanner's flash, the week
+planner's day list -- none of them had ever been seen. An earlier edit of mine
+had left an `@media (max-width:560px){` open, and everything written after it
+was nested inside a phone-width media query. On a phone it was hidden behind
+whatever came next; on anything wider it simply did not exist.
+
+Nothing failed. CSS has no way to fail: an unclosed block swallows what follows
+and the page renders, quietly missing its design. The stylesheet had 227 usable
+rules where it should have had 277.
+
+The runaway had been closed by a stray brace sixty lines further on -- attached
+to `.thumb{...}}`, a rule that only worked *because* of the runaway. Both are
+fixed, and `scripts/test_stylesheet.py` now checks the braces balance and that
+every rule the page depends on is reachable at the top level.
+
+## Breakfast, when the library already had recipes
+
+The planner tops the library up before planning, and it counted recipes rather
+than *breakfasts*. A library of a dozen dinners is twelve recipes, so the count
+said "enough", nothing was composed, and the morning was left empty. It now
+stocks each sitting separately.
+
+That exposed a second miscount. Most savoury dishes suit lunch and dinner
+alike, so one pool covers both: four dishes repeating three times each is
+twelve servings against the fourteen a week of lunches and dinners wants, and
+the seventh day ran out. The requirement now accounts for a pool serving two
+sittings.
+
+## "0 of 17 in the basket"
+
+Ticking an item off wrote the new count into `document.querySelector('.card .sub')`
+-- and the sign-in card stays in the document after you sign in, so the first
+`.card .sub` on the page is *its* subtitle. The count was going into a hidden
+element while the real one sat at zero. It has its own id now, updates before
+the save rather than after it, and says so if the save fails.
+
+## Clearing the week looked like it did nothing
+
+It did work: the seven day cards emptied. But the planner's report -- the list
+of what it had planned, Monday to Sunday -- stayed on screen underneath,
+listing every meal. Clearing and undo now drop the report, it is headed "What
+it planned" so it reads as a record rather than as the week, and it can be
+dismissed.
+
+## Prices you can find something in
+
+The list was one long scroll in insertion order. It can now be searched by
+food, product or store, and sorted six ways -- alphabetical by default, because
+a price list is something you look a thing up in.
+
+Judging a price needed history, and with one reading everything said "no
+history yet". The shelf itself knows: `wasPrice` is now carried through from
+the store and recorded with each reading, so a first reading can still say
+**on special, 33% off its usual $4.50**.
+
+## Written-your-own recipes read 0 kcal
+
+Nutrition came only from Open Food Facts, which answers to a barcode and often
+has never seen an Australian store line. When it had nothing, every figure was
+zero, the recipe went into the week reading 0 kcal, and nothing on screen said
+why.
+
+A store name still describes a food, so it now falls back to matching the
+ingredient table: *Woolworths RSPCA Approved Chicken Breast Fillet 1kg* is
+chicken breast. Every line says where its figures came from -- from the label,
+estimated, entered by hand, or **no nutrition** -- and the card warns when the
+total is missing something. A weak match is refused rather than guessed: at the
+first threshold a Cadbury Dairy Milk block matched "Milk, skim" and would have
+been presented as 35 kcal.
+
+Saved own-recipes now keep their product photographs, which is why they had
+none in the library: the photo map only knows the builder's own ingredient
+names, and a store product is not one of them.
+
+## Imported recipes keep their own measures
+
+Importing the RecipeTin Eats soda bread turned "2 cups buttermilk" into "455 g
+buttermilk" and "1 1/2 tsp baking soda" into nothing at all. The rule was "if
+we can work out the grams, say grams" -- and the grams are *our* conversion, so
+the numbers quietly disagreed with the page they came from.
+
+Cups and spoons are how recipes are written in both systems, so they are now
+scaled rather than converted, and written as a cook writes them:
+
+```
+2 cups white flour            about 265 g
+1 3/4 cups wholemeal flour    about 230 g
+1 1/2 tsp baking soda
+2 cups buttermilk             about 500 ml
+```
+
+The weight or volume is offered alongside, in millilitres for a liquid, and the
+page's own wording is shown against any line that scaling has had to change.
+
+## A library you can search
+
+Search by name or by ingredient -- "what can I do with the mince in the fridge"
+is the question a library actually gets asked -- filter by meal and by kind,
+and sort by rating, name, times cooked, calories or protein.
