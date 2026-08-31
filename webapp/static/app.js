@@ -851,6 +851,7 @@ function recipeCard(r, opts) {
   const origin = { mine: 'yours', imported: '', built: 'built to targets' }[
     recipeSource(r)];
   const tags = [
+    o.inWeek ? '<span class="tag ok">this week</span>' : '',
     mealTag(r),
     origin ? `<span class="tag">${esc(origin)}</span>` : '',
     r.cuisineLabel && r.cuisine !== 'any'
@@ -878,7 +879,21 @@ function recipeCard(r, opts) {
     ${controls ? `<div class="recipe-foot">${controls}</div>` : ''}</div>`;
 }
 
-const libView = { q: '', meal: '', cat: '', sort: 'best', from: '' };
+function weekRecipeIds() {
+  const ids = new Set();
+  if (!state.plan || !state.plan.data) return ids;
+  weekData().forEach((day) => (day.meals || []).forEach((m) => {
+    if (m.on !== false && m.recipeId != null) ids.add(Number(m.recipeId));
+  }));
+  return ids;
+}
+
+const WEEK_FILTER = [
+  { id: '', label: 'Everything' },
+  { id: 'week', label: 'In this week' },
+];
+
+const libView = { q: '', meal: '', cat: '', sort: 'best', from: '', week: '' };
 
 // Three ways a recipe gets into the library, and they are worth telling apart:
 // the ones you wrote are yours, the ones off a website belong to whoever wrote
@@ -911,11 +926,13 @@ const LIB_SORTS = [
 function libShown() {
   const list = state.recipes || [];
   const needle = libView.q.trim().toLowerCase();
+  const weekIds = weekRecipeIds();
   const shown = list.filter((r) => {
     if (libView.meal && !(r.meals || (r.meal ? [r.meal] : ['lunch', 'dinner']))
       .includes(libView.meal)) return false;
     if (libView.cat && categoryOf(r) !== libView.cat) return false;
     if (libView.from && recipeSource(r) !== libView.from) return false;
+    if (libView.week === 'week' && !weekIds.has(r.id)) return false;
     if (!needle) return true;
     // Searching the ingredients too, because "what can I do with the mince in
     // the fridge" is the question a library actually gets asked.
@@ -949,6 +966,7 @@ function viewRecipes() {
   }
 
   const shown = libShown();
+  const weekIds = weekRecipeIds();
 
   const counts = {};
   CAT_ORDER.forEach((c) => { counts[c] = list.filter(
@@ -982,6 +1000,9 @@ function viewRecipes() {
         <label for="libFrom">Where from</label>
         <select id="libFrom">${optionsFor(SOURCES, libView.from)}</select></div>
       <div style="flex:1;min-width:130px">
+        <label for="libWeek">This week</label>
+        <select id="libWeek">${optionsFor(WEEK_FILTER, libView.week)}</select></div>
+      <div style="flex:1;min-width:130px">
         <label for="libSort">Order</label>
         <select id="libSort">${optionsFor(LIB_SORTS, libView.sort)}</select></div>
     </div>
@@ -994,7 +1015,7 @@ function viewRecipes() {
     </div>
     ${shown.length
       ? `<div class="grid g2">${shown.map(
-          (r) => recipeCard(r, { library: true })).join('')}</div>`
+          (r) => recipeCard(r, { library: true, inWeek: weekIds.has(r.id) })).join('')}</div>`
       : '<p class="muted">Nothing matches those filters.</p>'}
   </div>`;
 }
@@ -1031,6 +1052,12 @@ This cannot be undone. Days in `
     } catch (err) {
       toast(err.message);
     }
+    render();
+  });
+
+  const week = $('libWeek');
+  if (week) week.addEventListener('change', () => {
+    libView.week = week.value;
     render();
   });
 
@@ -1381,6 +1408,28 @@ calorie target instead of stopping short of it">
 
 /* -------------------------------------------------------- shopping list */
 
+// The two figures a shopping trip is actually watched by. Shared between the
+// render and the tick handler so a checkbox click and a page reload can never
+// disagree about what they add up to -- which is exactly the bug this
+// replaced: ticking an item moved the count but left "still to get" frozen
+// at whatever it read on load, in precisely the moment it was being watched.
+function shopTotals(shop, got) {
+  let total = 0, remaining = 0, unpriced = 0;
+  Object.entries(shop).forEach(([food, meta]) => {
+    const p = latestPrice(food);
+    const packs = (meta && meta.packsNeeded) || 1;
+    const cost = p && p.price ? p.price * packs : null;
+    if (cost) {
+      total += cost;
+      if (!got.has(food)) remaining += cost;
+    } else {
+      unpriced += 1;
+    }
+  });
+  return { total, remaining, unpriced };
+}
+
+
 function gotSet() {
   const d = state.plan.data;
   if (!Array.isArray(d.got)) d.got = [];
@@ -1490,16 +1539,14 @@ function viewShop() {
     (byAisle[a] = byAisle[a] || []).push([food, meta || {}]);
   });
 
-  let total = 0;
-  let remaining = 0;
+  const totals = shopTotals(shop, got);
+  const total = totals.total;
+  const remaining = totals.remaining;
   const sections = order.concat(Object.keys(byAisle).filter((a) => !order.includes(a)))
     .filter((a) => byAisle[a])
     .map((aisle) => {
       const rows = byAisle[aisle].map(([food, meta]) => {
         const p = latestPrice(food);
-        const packs = meta.packsNeeded || 1;
-        const cost = p && p.price ? p.price * packs : null;
-        if (cost) { total += cost; if (!got.has(food)) remaining += cost; }
         const kg = perKg(p);
         const ticked = got.has(food);
         const link = p && p.url
@@ -1540,8 +1587,12 @@ function viewShop() {
       <button id="clearList" class="ghost danger">Clear list</button>
     </div>
     <div class="stats">
-      <div class="stat"><div class="k">Basket total</div><div class="v">${money(total)}</div></div>
-      <div class="stat"><div class="k">Still to get</div><div class="v">${money(remaining)}</div></div>
+      <div class="stat"><div class="k">Basket total</div>
+        <div class="v" id="shopTotalV">${money(total)}</div>
+        ${totals.unpriced ? `<div class="muted small" id="shopTotalNote">+${
+          totals.unpriced} item${totals.unpriced === 1 ? '' : 's'} not priced yet</div>` : ''}</div>
+      <div class="stat"><div class="k">Still to get</div>
+        <div class="v" id="shopRemainingV">${money(remaining)}</div></div>
       <div class="stat"><div class="k">Items</div><div class="v">${entries.length}</div></div>
     </div>
     <div id="refreshOut"></div>
@@ -1673,6 +1724,14 @@ function wireShop() {
       const head = $('basketCount');
       if (head) head.textContent =
         `${got.size} of ${Object.keys(state.plan.data.shop || {}).length} in the basket`;
+      // The number that actually matters while standing in an aisle. It used
+      // to only recompute on the next full reload -- frozen at exactly the
+      // moment it was being watched.
+      const totals = shopTotals(state.plan.data.shop || {}, got);
+      const totalV = $('shopTotalV');
+      if (totalV) totalV.textContent = money(totals.total);
+      const remainingV = $('shopRemainingV');
+      if (remainingV) remainingV.textContent = money(totals.remaining);
       try {
         await savePlan();
       } catch (err) {
@@ -2478,6 +2537,69 @@ function wireAddButtons() {
 }
 
 // A first guess so the prompt is usually just an Enter press.
+// A recipe site writes the ingredient list for a cook, not a shopping list.
+// "225g / 7oz chicken thigh fillets (, skinless boneless, cut into bite size
+// pieces)" says how to prepare it as much as what it is -- and the alternate
+// measure ("/ 7oz") is left stuck to the front once the first unit is used,
+// which is why the app's own matching (and its shopping list) needs this and
+// the parser upstream does not do it for us.
+function cleanIngredientName(part) {
+  let name = (part.item || part.original || '').trim();
+  name = name.replace(/^\/\s*[\d.]+\s*(?:fl\s?oz|floz|oz|lbs?|g|kg|ml|l)\.?\s*/i, '');
+  // Run twice: "(, packed (Holy Basil, if you can find it) (Note 1))" nests,
+  // and a single pass only clears the innermost pair.
+  for (let i = 0; i < 3; i++) name = name.replace(/\([^()]*\)/g, ' ');
+  name = name.replace(/,.*$/, '');
+  name = name.replace(/^[\s,\/]+|[\s,\/]+$/g, '').replace(/\s+/g, ' ').trim();
+  return name || (part.original || '').trim();
+}
+
+// Nutrition for every distinct ingredient an imported recipe names, matched
+// once and cached rather than guessed at again on every render.
+async function loadImportEstimates(r) {
+  const names = [...new Set((r.ingredients || []).map(cleanIngredientName))]
+    .filter(Boolean);
+  if (!names.length) { found.nutrition = {}; return; }
+  try {
+    const res = await api('/nutrition/estimate-many',
+      { method: 'POST', body: { names } });
+    found.nutrition = res.results || {};
+  } catch (err) {
+    found.nutrition = {};
+  }
+}
+
+// The rows a saved recipe actually needs -- one per ingredient, in the same
+// shape a generated or hand-written recipe already carries, so the planner,
+// the day totals and the shopping list treat an import no differently.
+function importedRows(r) {
+  const grams = r.scaledGrams || [];
+  return (r.ingredients || []).map((part, i) => {
+    const food = cleanIngredientName(part);
+    const total = grams[i];
+    const per = (r.servings && total != null) ? total / r.servings : null;
+    const est = found.nutrition[food];
+    return {
+      food, gramsPerServing: per, gramsTotal: total,
+      query: food, pack: null, aisle: guessAisle(food), role: 'other',
+      image: '', per100: (est && est.status === 'ok') ? est.per100 : null,
+    };
+  });
+}
+
+function importedTotals(rows) {
+  const t = { kcal: 0, p: 0, c: 0, f: 0, fb: 0 };
+  let known = 0;
+  rows.forEach((i) => {
+    if (!i.per100 || i.gramsPerServing == null) return;
+    known += 1;
+    const factor = i.gramsPerServing / 100;
+    ['kcal', 'p', 'c', 'f', 'fb'].forEach((k) => { t[k] += (i.per100[k] || 0) * factor; });
+  });
+  return { perServing: t, known, unknown: rows.length - known };
+}
+
+
 function guessAisle(name) {
   const n = (name || '').toLowerCase();
   if (/frozen|ice cream/.test(n)) return 'freezer';
@@ -2749,7 +2871,7 @@ function openPicker(dayIndex) {
     b.addEventListener('click', async () => {
       const servings = Math.max(1, Number($('pickServ').value) || 1);
       weekData()[dayIndex].meals.push({
-        recipeId: Number(b.dataset.choose), servings,
+        recipeId: Number(b.dataset.choose), servings, on: true,
         meal: sittingFor(dayIndex),
       });
       // The planner's report describes the week it planned, not this one.
@@ -3117,7 +3239,7 @@ function wireChosen() {
 
 /* ------------------------------------------------------------- find a recipe */
 
-const found = { recipe: null, servings: null, system: 'metric' };
+const found = { recipe: null, servings: null, system: 'metric', meal: '', nutrition: {} };
 
 function viewFind() {
   return `<div class="card">
@@ -3173,6 +3295,8 @@ function renderFound() {
       <label class="muted small">Serves
         <input type="number" id="impServ" min="1" max="50"
           value="${r.servings || 4}" style="width:64px;margin-left:6px"></label>
+      <label class="muted small">Meal
+        <select id="impMeal" style="margin-left:6px">${optionsFor(MEALS, found.meal)}</select></label>
       <div class="seg">
         <button class="${found.system === 'metric' ? 'on' : ''}" data-sys="metric">Metric</button>
         <button class="${found.system === 'imperial' ? 'on' : ''}" data-sys="imperial">Imperial</button>
@@ -3180,22 +3304,47 @@ function renderFound() {
       <div style="flex:1"></div>
       <button id="impSave" class="primary tiny">Save to my library</button>
     </div>
+    <div id="impNote" class="muted small" style="margin-top:8px"></div>
 
     <h4 style="margin:16px 0 6px">Ingredients</h4>
-    ${(r.lines || []).map((l, i) => {
-      const eq = (r.equivalents || [])[i];
-      const orig = (r.original || [])[i];
-      // The page's own wording is the authority. Ours agrees with it at the
-      // published serving count and has to differ once it is scaled, so show
-      // both rather than quietly replacing one with the other.
-      const differs = orig && orig.trim() !== l.trim();
-      return `<div class="meal ing-line">
-        <span>${esc(l)}</span>
-        ${eq ? `<span class="muted small">${esc(eq)}</span>` : ''}
-        ${differs ? `<span class="muted small as-written"
-          title="What the page says">page: ${esc(orig)}</span>` : ''}
-      </div>`;
-    }).join('')}
+    ${(() => {
+      const rows = importedRows(r);
+      const totals = importedTotals(rows);
+      return `${totals.unknown ? `<div class="warn">${totals.unknown}
+        ingredient${totals.unknown === 1 ? ' has' : 's have'} no nutrition
+        match, so ${totals.unknown === 1 ? 'it is' : 'they are'} missing from
+        the totals below. The recipe still saves and shops correctly --
+        it is only the kcal/protein figures that are short.</div>` : ''}
+      ${(r.lines || []).map((l, i) => {
+        const eq = (r.equivalents || [])[i];
+        const orig = (r.original || [])[i];
+        // The page's own wording is the authority. Ours agrees with it at the
+        // published serving count and has to differ once it is scaled, so show
+        // both rather than quietly replacing one with the other.
+        const differs = orig && orig.trim() !== l.trim();
+        const row = rows[i];
+        return `<div class="meal ing-line">
+          <span>${esc(l)}</span>
+          ${eq ? `<span class="muted small">${esc(eq)}</span>` : ''}
+          ${differs ? `<span class="muted small as-written"
+            title="What the page says">page: ${esc(orig)}</span>` : ''}
+          ${row && row.per100
+            ? `<span class="tag ok">${Math.round((row.per100.kcal || 0) * (row.gramsPerServing || 0) / 100)} kcal</span>`
+            : '<span class="tag stop">no nutrition</span>'}
+        </div>`;
+      }).join('')}
+      ${rows.length ? `<div class="stats" style="margin-top:14px">
+        <div class="stat"><div class="k">Per serving</div>
+          <div class="v">${Math.round(totals.perServing.kcal)}<span class="muted"
+            style="font-size:14px"> kcal</span></div></div>
+        <div class="stat"><div class="k">Protein each</div>
+          <div class="v">${Math.round(totals.perServing.p)}<span class="muted"
+            style="font-size:14px"> g</span></div></div>
+        <div class="stat"><div class="k">Fibre each</div>
+          <div class="v">${Math.round(totals.perServing.fb)}<span class="muted"
+            style="font-size:14px"> g</span></div></div>
+      </div>` : ''}`;
+    })()}
 
     ${(r.steps || []).length ? `<h4 style="margin:16px 0 6px">Method</h4>
       <ol class="steps">${r.steps.map((st) => `<li>${esc(st)}</li>`).join('')}</ol>
@@ -3220,6 +3369,9 @@ function wireFound() {
   const serv = $('impServ');
   if (serv) serv.addEventListener('change', rescaleFound);
 
+  const meal = $('impMeal');
+  if (meal) meal.addEventListener('change', () => { found.meal = meal.value; });
+
   document.querySelectorAll('[data-sys]').forEach((b) => {
     b.addEventListener('click', () => {
       found.system = b.dataset.sys;
@@ -3231,6 +3383,8 @@ function wireFound() {
   if (save) {
     save.addEventListener('click', async () => {
       const r = found.recipe;
+      const rows = importedRows(r);
+      const totals = importedTotals(rows);
       save.disabled = true;
       save.textContent = 'Saving…';
       try {
@@ -3240,7 +3394,15 @@ function wireFound() {
             recipes: [{
               name: r.name,
               servings: r.servings,
-              ingredients: (r.lines || []).map((l) => ({ food: l, qty: '' })),
+              meal: found.meal || undefined,
+              perServing: {
+                kcal: Math.round(totals.perServing.kcal),
+                p: Math.round(totals.perServing.p * 10) / 10,
+                c: Math.round(totals.perServing.c * 10) / 10,
+                f: Math.round(totals.perServing.f * 10) / 10,
+                fb: Math.round(totals.perServing.fb * 10) / 10,
+              },
+              ingredients: rows,
               steps: r.steps || [],
               storage: '',
               reheat: [],
@@ -3248,6 +3410,13 @@ function wireFound() {
               sourceName: r.sourceName,
               imported: true,
               image: r.image || '',
+              // For the Sunday cook sheet -- the site's own numbers, kept
+              // exactly as it stated them, never re-derived from the prose.
+              prepTime: r.prepTime || '', cookTime: r.cookTime || '',
+              totalTime: r.totalTime || '',
+              prepMinutes: r.prepMinutes ?? null,
+              cookMinutes: r.cookMinutes ?? null,
+              totalMinutes: r.totalMinutes ?? null,
             }],
           },
         });
@@ -3277,6 +3446,7 @@ function wireFindRecipe() {
         body: { url: value, system: found.system },
       });
       found.recipe = res.recipe;
+      await loadImportEstimates(res.recipe);
       $('impOut').innerHTML = renderFound();
       wireFound();
     } catch (err) {
@@ -4219,7 +4389,7 @@ function wireAuto() {
 
 /* -------------------------------------------------------- write your own */
 
-const own = { name: '', servings: 4, items: [], steps: [''], busy: false };
+const own = { name: '', servings: 4, meal: '', items: [], steps: [''], busy: false };
 
 function ownMacros() {
   const t = { kcal: 0, p: 0, c: 0, f: 0, fb: 0 };
@@ -4308,6 +4478,10 @@ function viewOwn() {
         <input id="ownName" value="${esc(own.name)}" placeholder="e.g. Sunday chilli"></div>
       <div><label for="ownServ">Makes how many servings</label>
         <input id="ownServ" type="number" min="1" max="20" value="${own.servings}"></div>
+    </div>
+    <div class="grid g2" style="margin-top:10px">
+      <div><label for="ownMeal">Meal</label>
+        <select id="ownMeal">${optionsFor(MEALS, own.meal)}</select></div>
     </div>
 
     <h4 style="margin:18px 0 6px">Ingredients</h4>
@@ -4503,6 +4677,8 @@ function wireOwn() {
     own.servings = Math.max(1, Number(serv.value) || 1);
     render();
   });
+  const meal = $('ownMeal');
+  if (meal) meal.addEventListener('change', () => { own.meal = meal.value; });
 
   const find = $('ownFind');
   if (find) find.addEventListener('click', ownSearch);
@@ -4595,6 +4771,7 @@ function wireOwn() {
               storage: '',
               reheat: [],
               ownRecipe: true,
+              meal: own.meal || undefined,
             }],
           },
         });

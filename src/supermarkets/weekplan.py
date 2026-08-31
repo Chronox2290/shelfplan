@@ -138,6 +138,103 @@ def _fit_score(candidate: Dict[str, float], gap: Dict[str, float]) -> float:
     return (protein_value * 2.0 + fibre_value * 1.4) / (candidate["kcal"] / 100.0)
 
 
+# A dish cooked for exactly one sitting all week is not meal prep, it is a
+# recipe -- its own pan, its own wash-up, its own trip to buy one ingredient
+# nothing else on the list needs. The day-by-day fill above can land there
+# without meaning to: whatever best closes one day's particular gap wins that
+# slot, and if nothing else that week happened to need the same thing, it
+# never gets a second use.
+_MIN_SITTINGS = 2
+
+
+def _merge_singletons(
+    out_days: List[Dict[str, Any]],
+    by_id: Dict[Any, Dict[str, Any]],
+    used_count: Dict[Any, int],
+    goals: Dict[str, float],
+    max_repeats: int,
+) -> None:
+    """Fold any once-only dish into something already earning its place.
+
+    For each dish used in exactly one sitting, look for a dish already used
+    at least twice elsewhere that suits the same sitting and would not
+    meaningfully change that day's totals if it stood in instead. Rescale it
+    to roughly the same calories the singleton was contributing, swap it in,
+    and only keep the swap if the day is left at least as on-target as it was.
+
+    Mutates `out_days` and `used_count` in place. A singleton with nothing
+    good to replace it stays -- keeping a day on target matters more than
+    keeping the dish count down, and that trade only goes one way.
+    """
+    locations: Dict[Any, int] = {}
+    for day in out_days:
+        for line in day["meals"]:
+            locations[line["recipeId"]] = locations.get(line["recipeId"], 0) + 1
+    singletons = [rid for rid, n in locations.items() if n == 1]
+
+    for rid in singletons:
+        for day in out_days:
+            slot = next((i for i, line in enumerate(day["meals"])
+                        if line["recipeId"] == rid), None)
+            if slot is None:
+                continue
+            line = day["meals"][slot]
+            sitting = line.get("meal") or None
+            singleton_macros = _macros(by_id[rid], line["servings"])
+
+            same_day_ids = {m["recipeId"] for m in day["meals"]}
+            best_id, best_gap, best_servings = None, None, None
+            for cid, recipe in by_id.items():
+                if cid == rid or cid in same_day_ids:
+                    continue
+                if not (_MIN_SITTINGS <= used_count.get(cid, 0) < max_repeats):
+                    continue        # not already earning its place, or full up
+                if not recipe_suits(recipe, sitting):
+                    continue
+                per_kcal = (recipe.get("perServing") or {}).get("kcal") or 0
+                if per_kcal <= 0:
+                    continue
+                servings = max(0.3, min(3.0, singleton_macros["kcal"] / per_kcal))
+                candidate_macros = _macros(recipe, servings)
+                gap = (abs(candidate_macros["kcal"] - singleton_macros["kcal"])
+                       + abs(candidate_macros["p"] - singleton_macros["p"]) * 3
+                       + abs(candidate_macros["fb"] - singleton_macros["fb"]) * 2)
+                if best_gap is None or gap < best_gap:
+                    best_id, best_gap, best_servings = cid, gap, servings
+
+            # A wildly different dish is not a fix -- rather one dish cooked
+            # once than a day quietly reshaped around whatever else was
+            # already in the pot.
+            if best_id is None or best_gap > 220:
+                continue
+
+            new_macros = _macros(by_id[best_id], best_servings)
+            total = dict(day["totals"])
+            for key in total:
+                total[key] = round(
+                    total[key] - singleton_macros[key] + new_macros[key], 1)
+            met = {
+                "kcal": total["kcal"] <= goals["ceiling"],
+                "protein": total["p"] >= goals["floorP"],
+                "fibre": total["fb"] >= goals["floorF"],
+            }
+            # Only keep the swap if it does not cost the day a target it was
+            # otherwise meeting.
+            if day["allMet"] and not all(met.values()):
+                continue
+
+            line["recipeId"] = best_id
+            line["servings"] = round(best_servings, 2)
+            day["names"][slot] = by_id[best_id].get("name", "")
+            day["totals"] = total
+            day["met"] = met
+            day["allMet"] = all(met.values())
+
+            used_count[rid] = max(0, used_count.get(rid, 0) - 1)
+            used_count[best_id] = used_count.get(best_id, 0) + 1
+            break
+
+
 def sittings_for(meals_per_day: int) -> List[str]:
     """The distinct sittings a day of this length has, in order."""
     seen, out = set(), []
@@ -366,8 +463,25 @@ def plan_week(
             "allMet": all(met.values()),
         })
 
+    # A dish cooked for one sitting all week is cooked for its own sake, not
+    # for the week's -- fold it into something that already earns its place
+    # wherever that does not cost a day a target it was meeting.
+    _merge_singletons(out_days, by_id, used_count, goals, max_repeats)
+
+    # The repair pass can change which dish, and how much of it, every day
+    # buys -- rebuilding from the final days is simpler and safer than
+    # patching the running basket by the same deltas twice.
+    basket = {}
+    for day in out_days:
+        for line in day["meals"]:
+            recipe = by_id.get(line["recipeId"])
+            if recipe is not None:
+                add_to_basket(recipe, basket, line["servings"])
+
     good = sum(1 for d in out_days if d["allMet"])
     money = basket_cost(basket, prices) if prices else None
+    distinct_dishes = len({line["recipeId"]
+                           for day in out_days for line in day["meals"]})
     return {
         "days": out_days,
         "daysMeetingTargets": good,
@@ -377,21 +491,27 @@ def plan_week(
         "mostlyLeftOver": money["mostlyLeftOver"] if money else [],
         "budget": budget,
         "distinctIngredients": len(basket),
-        "message": _summarise(out_days, goals, money, budget),
+        # What Sunday actually looks like: how many separate things get
+        # cooked, not how many meals get eaten.
+        "dishesToCook": distinct_dishes,
+        "message": _summarise(out_days, goals, money, budget, distinct_dishes),
     }
 
 
 def _summarise(days: List[Dict[str, Any]], goals: Dict[str, float],
                money: Optional[Dict[str, Any]] = None,
-               budget: Optional[float] = None) -> str:
+               budget: Optional[float] = None,
+               dishes: Optional[int] = None) -> str:
     good = sum(1 for d in days if d["allMet"])
     if not days:
         return "Nothing could be planned."
 
     note = ""
+    if dishes:
+        note += f" {dishes} dish{'es' if dishes != 1 else ''} to cook."
     if money and money.get("till"):
         till, eaten = money["till"], money["eaten"]
-        note = f" About ${till:.0f} at the till"
+        note += f" About ${till:.0f} at the till"
         if till - eaten >= 10:
             note += (f", though only ${eaten:.0f} of that is eaten this week --"
                      f" the rest is pack you keep")

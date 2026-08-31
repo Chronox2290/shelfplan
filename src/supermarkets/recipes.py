@@ -369,6 +369,10 @@ INGREDIENTS: Dict[str, Dict[str, Any]] = {
 TEMPLATES: Sequence[Dict[str, Any]] = (
     dict(id="traybake", name="{protein} tray bake with {base} and {veg}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="oven", active_min=8, passive_min=35,
          steps=("Heat the oven to 200C.",
                 "Toss the {veg} and {base} with the oil, salt and pepper.",
                 "Spread on a lined tray and roast 20 minutes.",
@@ -382,6 +386,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="stirfry", name="{protein} stir-fry with {base} and {veg}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce="Soy sauce",
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=12, passive_min=0,
          steps=("Cook the {base} to packet directions and set aside.",
                 "Heat the oil in a wok over high heat.",
                 "Sear the {protein} in batches, then remove.",
@@ -395,6 +403,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="ragu", name="{protein} ragu with {base}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce="Tomato passata",
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=10, passive_min=25,
          steps=("Heat the oil in a heavy pan.",
                 "Brown the {protein}, breaking it up as it colours.",
                 "Add the {veg} and cook 5 minutes until softened.",
@@ -407,6 +419,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="curry", name="{protein} curry with {base}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce="Red curry paste",
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=8, passive_min=15,
          steps=("Cook the {base} and set aside.",
                 "Fry the {sauce} in the oil for 1 minute until fragrant.",
                 "Add the {protein} and seal on all sides.",
@@ -419,6 +435,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="bowl", name="{protein} and {base} bowl with {veg}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=10, passive_min=0,
          steps=("Cook the {base} and cool slightly.",
                 "Season and pan-cook the {protein} until done, then slice.",
                 "Steam or blanch the {veg} for 3 minutes.",
@@ -431,6 +451,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="soup", name="{protein} and {veg} soup with {base}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce="Tomato passata",
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=10, passive_min=20,
          steps=("Soften the {veg} in the oil for 6-8 minutes.",
                 "Add the {protein} and cook until coloured.",
                 "Add the {sauce} and 1L of stock, simmer 20 minutes.",
@@ -443,6 +467,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="skillet", name="{protein} skillet with {base} and {veg}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=8, passive_min=8,
          steps=("Heat the oil in a wide pan over medium-high heat.",
                 "Brown the {protein} on all sides and move it to a plate.",
                 "Cook the {veg} in the same pan for 5 minutes, scraping up what stuck.",
@@ -455,6 +483,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="bake", name="Baked {protein} with {base} and {veg}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce="Tomato passata",
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="oven", active_min=10, passive_min=35,
          steps=("Heat the oven to 190C.",
                 "Par-cook the {base} for half its packet time and drain.",
                 "Toss the {veg} and {base} with the {sauce} and the oil in a baking dish.",
@@ -469,6 +501,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="stew", name="{protein} stew with {veg} and {base}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce="Tomato passata",
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=12, passive_min=70,
          steps=("Heat the oil in a heavy pot and brown the {protein} in batches.",
                 "Soften the {veg} in the same pot for 6 minutes.",
                 "Return the {protein}, add the {sauce} and enough stock to cover.",
@@ -482,6 +518,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="noodles", name="{protein} noodles with {veg}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce="Soy sauce",
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=10, passive_min=0,
          steps=("Cook the {base} to just under packet time and rinse in cold water.",
                 "Heat the oil in a wok until it shimmers.",
                 "Sear the {protein} hard for 2 minutes, then push it to one side.",
@@ -495,6 +535,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="friedrice", name="{protein} fried rice with {veg}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce="Soy sauce",
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=8, passive_min=0,
          steps=("Cook the {base} the day before and chill it; warm rice steams instead of frying.",
                 "Heat the oil in a wok over the highest heat you have.",
                 "Cook the {protein} through and set it aside.",
@@ -508,6 +552,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="salad", name="{protein} salad with {base} and {veg}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=12, passive_min=0,
          steps=("Cook the {base} and spread it out to cool quickly.",
                 "Season the {protein} and cook it through, then slice.",
                 "Cut the {veg} small enough to eat with a fork.",
@@ -520,6 +568,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="wrap", name="{protein} wraps with {veg}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=10, passive_min=0,
          steps=("Cook the {protein} with the oil and plenty of seasoning.",
                 "Shred or slice it and let it cool.",
                 "Prepare the {veg} raw or lightly charred, whichever you prefer.",
@@ -532,6 +584,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="grill", name="Grilled {protein} skewers with {base} and {veg}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=12, passive_min=0,
          steps=("Cut the {protein} into even pieces and toss with the oil and seasoning.",
                 "Thread onto skewers, leaving a gap between pieces so they colour.",
                 "Grill or pan-sear 3-4 minutes a side until charred at the edges.",
@@ -544,6 +600,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="braise", name="Braised {protein} with {veg} and {base}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce="Tomato passata",
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="oven", active_min=15, passive_min=90,
          steps=("Heat the oven to 160C.",
                 "Brown the {protein} hard in an ovenproof pot and set it aside.",
                 "Soften the {veg} in the same pot for 8 minutes.",
@@ -557,6 +617,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="pilaf", name="{protein} pilaf with {veg}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=7, passive_min=20,
          steps=("Toast the dry {base} in the oil for 2 minutes until it smells nutty.",
                 "Add the {veg} and cook 3 minutes.",
                 "Pour in twice the volume of stock, bring to a simmer and lid on.",
@@ -569,6 +633,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="chowder", name="{protein} chowder with {base}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=10, passive_min=15,
          steps=("Soften the {veg} in the oil for 8 minutes without colouring them.",
                 "Add the diced {base} and 800ml of stock, simmer until tender.",
                 "Blend about a third of the pot and stir it back in to thicken.",
@@ -581,6 +649,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="frittata", name="{protein} frittata with {veg} and {base}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="oven", active_min=10, passive_min=15,
          steps=("Heat the oven to 180C.",
                 "Cook the {base} and the {veg} in an ovenproof pan with the oil.",
                 "Add the cooked {protein} and spread everything level.",
@@ -594,6 +666,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="tagine", name="{protein} tagine with {veg} and {base}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce="Tomato passata",
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=8, passive_min=45,
          steps=("Fry the spices in the oil for a minute until they smell toasted.",
                 "Add the {protein} and colour it on all sides.",
                 "Add the {veg} and the {sauce} with 300ml of stock.",
@@ -607,6 +683,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="porridge", name="{base} porridge with {veg}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="assemble", active_min=5, passive_min=0,
          steps=("Put the {base} and the {protein} in a pan over medium heat.",
                 "Stir until it thickens, about 5 minutes.",
                 "Fold the {veg} through at the end so it keeps its shape.",
@@ -619,6 +699,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="yoghurtbowl", name="{protein} bowl with {veg} and {base}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="assemble", active_min=3, passive_min=0,
          steps=("Toast the {base} in a dry pan for 3 minutes until it smells nutty.",
                 "Spoon the {protein} into jars or containers.",
                 "Add the {veg} on top.",
@@ -631,6 +715,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="smoothie", name="{veg} and {protein} smoothie with {base}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="blender", active_min=5, passive_min=0,
          steps=("Put the {veg}, {protein} and {base} in the blender.",
                 "Add 200ml of water or milk and the nut butter or seeds.",
                 "Blend 45 seconds until there is nothing left to chew.",
@@ -643,6 +731,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="eggs", name="{protein} on {base} with {veg}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=8, passive_min=0,
          steps=("Cook the {veg} in the butter or oil until soft, about 4 minutes.",
                 "Add the {protein} and cook gently, stirring, until just set.",
                 "Take it off the heat while it still looks slightly underdone; it carries on cooking.",
@@ -655,6 +747,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="shakshuka", name="{protein} baked in {veg} with {base}",
          roles=("protein", "base", "veg", "sauce", "fat"), sauce="Tomato passata",
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=12, passive_min=10,
          steps=("Soften the {veg} in the oil for 8 minutes.",
                 "Add the {sauce} and simmer until it thickens, about 10 minutes.",
                 "Make wells and break the {protein} into them.",
@@ -667,6 +763,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="breakfasthash", name="{protein} and {veg} hash with {base}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="stovetop", active_min=14, passive_min=0,
          steps=("Dice the {base} small and par-cook it for 6 minutes.",
                 "Fry it in the oil, pressed flat, until the edges crisp.",
                 "Add the {veg} and cook 4 minutes.",
@@ -679,6 +779,10 @@ TEMPLATES: Sequence[Dict[str, Any]] = (
 )),
     dict(id="crumbed", name="Crumbed {protein} with {base} and {veg}",
          roles=("protein", "base", "veg", "fat"), sauce=None,
+         # Hands-on minutes, minutes it needs nothing from you, and what
+         # has to be free for it to run -- an oven or a stovetop hosts one
+         # dish at a time, everything else runs alongside anything.
+         device="oven", active_min=12, passive_min=20,
          steps=("Heat the oven to 200C and put a tray in to get hot.",
                 "Coat the {protein} in flour, then egg, then breadcrumbs, pressing them on.",
                 "Lay it on the hot tray with the oil and bake 20 minutes, turning once.",
@@ -1203,6 +1307,65 @@ def _pick(options: List[str], seed: str, offset: int) -> Optional[str]:
     return options[int(digest[:8], 16) % len(options)]
 
 
+# A meal-prep week is not seven independent dishes -- it is a handful of
+# things bought and cooked once, plated a different way each day. Roasting
+# one tray of chicken breast that turns up in Monday's bowl and Wednesday's
+# stir-fry is one thing to buy, one thing to cook and one thing to wash up;
+# picking a fresh protein for every dish is five of each for a week that eats
+# the same way.
+#
+# Two roles are worth locking to a shared pool: protein, because it is what
+# dominates both the shopping cost and the pan on Sunday, and base, because a
+# rice cooker or a pot of pasta is exactly the kind of thing worth running
+# once for the whole week rather than once per dish. Veg is left free --
+# reusing the exact same vegetable in every dish is not variety, and a bag of
+# frozen mixed veg covers most of it in one step regardless of which dish it
+# lands in.
+_POOL_CAP = 2
+_POOL_ROLES = ("protein", "base")
+
+
+def _template_reuses_pool(template_id: str, pool: Optional[Dict[str, List[str]]],
+                          cuisine: str, diet: Optional[str],
+                          exclude: Sequence[str]) -> bool:
+    """Could this template actually be built from something the pool holds?"""
+    if not pool:
+        return False
+    for role in _POOL_ROLES:
+        have = pool.get(role) or []
+        if not have:
+            continue
+        options, _ = _pool_for(role, cuisine, diet, exclude, template_id)
+        if any(food in options for food in have):
+            return True
+    return False
+
+
+def _pick_preferred(role: str, pool: Dict[str, List[str]], cuisine: str,
+                    diet: Optional[str], exclude: Sequence[str],
+                    template_id: Optional[str], seed: str, offset: int
+                    ) -> Optional[str]:
+    """Reuse whatever this role is already using elsewhere this week.
+
+    Falls back to the ordinary seeded pick when nothing already chosen fits
+    this template, diet or cuisine -- a Mexican dinner does not get stuck with
+    Tuesday's soy-glazed chicken just because it came first.
+    """
+    options, _ = _pool_for(role, cuisine, diet, exclude, template_id)
+    if not options:
+        return None
+    have = pool.get(role) or []
+    compatible = [food for food in have if food in options]
+    if compatible:
+        return _pick(compatible, seed, offset)
+    choice = _pick(options, seed, offset)
+    if choice and len(have) < _POOL_CAP:
+        pool.setdefault(role, [])
+        if choice not in pool[role]:
+            pool[role].append(choice)
+    return choice
+
+
 def _macros(parts: Dict[str, float]) -> Dict[str, float]:
     """Total macros for a mapping of ingredient -> grams."""
     total = dict(kcal=0.0, p=0.0, c=0.0, f=0.0, fb=0.0)
@@ -1286,6 +1449,7 @@ def build_recipe(
     pick: Optional[Dict[str, str]] = None,
     fibre_per_serving: Optional[float] = None,
     meal: Optional[str] = None,
+    prefer_pool: Optional[Dict[str, List[str]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Compose one recipe meeting the targets, or None if nothing fits.
 
@@ -1293,6 +1457,13 @@ def build_recipe(
     the seed choose them. That is what makes the book browsable: every
     combination can be asked for by name and comes back the same every time,
     rather than being whatever a hash happened to land on.
+
+    `prefer_pool`, if given, is read *and written*: a dish generated with it
+    reuses whichever protein and base are already in the pool when they fit,
+    and adds its own choice to the pool otherwise (up to a small cap). Callers
+    building several dishes for one week share the same dict across every call
+    so a roast chicken and a pot of rice keep turning up rather than a fresh
+    protein and starch for every single one.
     """
     theme = CUISINES.get(cuisine or "any") or CUISINES["any"]
     allowed = theme.get("templates") or ()
@@ -1315,30 +1486,49 @@ def build_recipe(
         return None
 
     # Walk the allowed templates from a seeded start, keeping the first that
-    # the theme can actually fill. Only if none can does an off-theme
-    # substitution happen, and then it is recorded in the notes.
+    # the theme can actually fill. Two passes when there is a pool to reuse:
+    # first only templates that could actually carry the protein or base
+    # already committed to elsewhere this week, then the ordinary walk,
+    # unchanged, if none of them can. Without a pass biased toward reuse, the
+    # pool only ever helps by coincidence -- the template gets picked first,
+    # independently of what is already in the pool, and most of the time
+    # nothing in the pool happens to suit whatever template that was.
     start = int(hashlib.sha256(f"{seed}:t:{offset}".encode()).hexdigest()[:8], 16)
     template = templates[start % len(templates)]
     off_theme_roles: List[str] = []
-    for step in range(len(templates)):
-        candidate = templates[(start + step) % len(templates)]
-        tid = candidate["id"]
-        misses = [role for role in ("protein", "base", "veg")
-                  if not _pool_for(role, cuisine, diet, exclude, tid)[1]]
-        if not misses:
-            template = candidate
-            off_theme_roles = []
+    found_template = False
+    for prefer_only in ((True, False) if prefer_pool else (False,)):
+        for step in range(len(templates)):
+            candidate = templates[(start + step) % len(templates)]
+            tid = candidate["id"]
+            if prefer_only and not _template_reuses_pool(
+                    tid, prefer_pool, cuisine, diet, exclude):
+                continue
+            misses = [role for role in ("protein", "base", "veg")
+                      if not _pool_for(role, cuisine, diet, exclude, tid)[1]]
+            if not misses:
+                template = candidate
+                off_theme_roles = []
+                found_template = True
+                break
+            if step == 0 and not prefer_only:
+                off_theme_roles = misses
+        if found_template:
             break
-        if step == 0:
-            off_theme_roles = misses
     
 
     tid = template["id"]
     chosen = pick or {}
-    protein = chosen.get("protein") or _pick(
-        _pool_for("protein", cuisine, diet, exclude, tid)[0], seed, offset * 7 + 1)
-    base = chosen.get("base") or _pick(
-        _pool_for("base", cuisine, diet, exclude, tid)[0], seed, offset * 7 + 2)
+    if prefer_pool is not None:
+        protein = chosen.get("protein") or _pick_preferred(
+            "protein", prefer_pool, cuisine, diet, exclude, tid, seed, offset * 7 + 1)
+        base = chosen.get("base") or _pick_preferred(
+            "base", prefer_pool, cuisine, diet, exclude, tid, seed, offset * 7 + 2)
+    else:
+        protein = chosen.get("protein") or _pick(
+            _pool_for("protein", cuisine, diet, exclude, tid)[0], seed, offset * 7 + 1)
+        base = chosen.get("base") or _pick(
+            _pool_for("base", cuisine, diet, exclude, tid)[0], seed, offset * 7 + 2)
     veg_pool = _pool_for("veg", cuisine, diet, exclude, tid)[0]
     if fibre_per_serving and not chosen.get("veg"):
         # Some vegetables cannot carry a fibre floor at any sane portion: a
@@ -1482,7 +1672,15 @@ def build_recipe(
                   + ([theme["finish"]] if theme.get("finish") else [])),
         "storage": template.get("storage", ""),
         "protein": protein,
+        "base": base,
+        "veg": veg,
         "reheat": list(template.get("reheat", ())),
+        # What a Sunday cook sheet schedules against: what has to be free to
+        # cook this (an oven and a stovetop each host one dish at a time),
+        # and how many minutes are hands-on versus just sitting there.
+        "device": template.get("device", "stovetop"),
+        "activeMinutes": template.get("active_min", 10),
+        "passiveMinutes": template.get("passive_min", 0),
     }
 
 
@@ -1690,6 +1888,7 @@ def build_best(
     meal: Optional[str] = None,
     prices: Optional[Dict[str, Dict[str, Any]]] = None,
     cost_ceiling: Optional[float] = None,
+    prefer_pool: Optional[Dict[str, List[str]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Build several candidates and return the one that best fits the targets.
 
@@ -1708,7 +1907,8 @@ def build_best(
         candidate = _finish(build_recipe(
             seed, servings, t["kcal"], t["protein"], diet, exclude,
             offset=start_offset + step, cuisine=cuisine,
-            fibre_per_serving=t.get("fibreMin"), meal=meal))
+            fibre_per_serving=t.get("fibreMin"), meal=meal,
+            prefer_pool=prefer_pool))
         if candidate is None:
             continue
         penalty = score_against(candidate["perServing"], t)
@@ -1727,6 +1927,17 @@ def build_best(
                 candidate["costPerProtein"] = round(rate, 4)
                 over = max(0.0, rate - cost_ceiling) / cost_ceiling
                 penalty += 1.6 * over + 0.3 * (rate / cost_ceiling)
+        if prefer_pool:
+            # `build_recipe` already prefers reusing the pool when a template
+            # allows it, but this loop tries several templates and keeps
+            # whichever scores best on macros and cost alone -- with nothing
+            # here, a candidate that happened not to reuse anything can still
+            # win by a fraction of a point, and the whole point of the pool
+            # was to make reuse the thing actually chosen, not just attempted.
+            if candidate.get("protein") in (prefer_pool.get("protein") or []):
+                penalty -= 0.12
+            if candidate.get("base") in (prefer_pool.get("base") or []):
+                penalty -= 0.06
         if best_score is None or penalty < best_score:
             best, best_score = candidate, penalty
         if penalty < 0.05 and not cost_ceiling:
@@ -1755,17 +1966,26 @@ def build_plan(
     meals_wanted: Optional[Sequence[str]] = None,
     prices: Optional[Dict[str, Dict[str, Any]]] = None,
     cost_ceiling: Optional[float] = None,
+    prefer_pool: Optional[Dict[str, List[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Build several distinct recipes for one week's prep.
 
     `meals_wanted` spreads them over the day -- ask for nine with breakfast,
     lunch and dinner and you get three of each, rather than nine dinners and a
     week that suggests chicken ragu at seven in the morning.
+
+    Every dish generated in this call shares one pool of proteins and bases,
+    so the second and third dishes reuse what the first one already committed
+    to rather than rolling something new. Pass a dict in from outside (and
+    reuse the same dict across several calls) to share that pool across a
+    whole week rather than just one batch -- a roast chicken bought for
+    lunch is a roast chicken dinner can reuse too.
     """
     goals = {**DEFAULT_TARGETS, "kcal": kcal_per_serving,
              "protein": protein_per_serving, **(targets or {})}
     out: List[Dict[str, Any]] = []
     seen: set = set()
+    pool: Dict[str, List[str]] = prefer_pool if prefer_pool is not None else {}
 
     # Round-robin over the meals asked for, so nine dishes across three meals
     # come back three, three and three rather than however the seed fell.
@@ -1781,7 +2001,7 @@ def build_plan(
             recipe = build_best(seed, goals, servings, diet, exclude, cuisine,
                                 tries=8 if prices else 4, start_offset=offset,
                                 meal=meal, prices=prices,
-                                cost_ceiling=cost_ceiling)
+                                cost_ceiling=cost_ceiling, prefer_pool=pool)
             offset += 4
             if not recipe:
                 continue

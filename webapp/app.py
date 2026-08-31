@@ -856,6 +856,45 @@ def estimate_nutrition(
     }
 
 
+class NutritionEstimateManyRequest(BaseModel):
+    names: List[str] = Field(..., min_length=1, max_length=100)
+
+
+@app.post("/api/nutrition/estimate-many")
+def estimate_nutrition_many(
+    body: NutritionEstimateManyRequest,
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """The single-name estimate, for a whole recipe's ingredients in one call.
+
+    An imported recipe can carry a dozen lines, and asking for each one
+    separately is a dozen round trips for what is a plain in-memory scan over
+    a hundred-odd ingredients -- cheap enough in bulk that there is no reason
+    to make the page wait twelve times over for it.
+    """
+    out: Dict[str, Any] = {}
+    for raw in body.names[:100]:
+        name = (raw or "").strip()[:200]
+        if not name or name in out:
+            continue
+        best_name, best_score = None, 0.0
+        for food, meta in recipes.INGREDIENTS.items():
+            for candidate in (food, meta["query"]):
+                score = resolve.name_similarity(candidate, name)
+                if score > best_score:
+                    best_name, best_score = food, score
+        if not best_name or best_score < 0.55:
+            out[name] = {"status": "not_found"}
+            continue
+        meta = recipes.INGREDIENTS[best_name]
+        out[name] = {
+            "status": "ok", "matched": best_name,
+            "confidence": round(best_score, 2),
+            "per100": {k: meta[k] for k in ("kcal", "p", "c", "f", "fb")},
+        }
+    return {"results": out}
+
+
 @app.get("/api/food-images")
 def food_images(
     user: User = Depends(auth.current_user),
@@ -1007,6 +1046,23 @@ def autoplan(
     shared = max(1, len([s for s in sittings if s != "breakfast"]))
     repeats = max(1, body.max_repeats)
 
+    # One pool of proteins and bases for lunch and dinner, and a separate one
+    # for breakfast. A meal-prep week is cooked from a handful of things
+    # bought and cooked once -- a roast chicken that turns up in Monday's bowl
+    # and Wednesday's stir-fry is one tray, not two -- and sharing a dict
+    # across a sitting's generation is what makes that the default rather
+    # than something the library has to already contain.
+    #
+    # Breakfast gets its own pool rather than sharing the savoury one: a
+    # breakfast template's protein pool is whey, yoghurt, eggs -- nothing a
+    # traybake or a stir-fry would ever pick -- so if breakfast filled the one
+    # shared pool first, every lunch and dinner dish would find it already
+    # full of things it cannot use, and never get the chance to fill it with
+    # anything of its own. Sharing is only worth doing where reuse is
+    # actually possible.
+    savoury_pool: Dict[str, List[str]] = {}
+    breakfast_pool: Dict[str, List[str]] = {}
+
     for sitting in sittings:
         covers = 1 if sitting == "breakfast" else shared
         need_each = max(3, -(-body.days * covers // repeats) + 1)
@@ -1035,7 +1091,8 @@ def autoplan(
             # was asked to avoid.
             targets={"kcal": max(200.0, body.ceiling * share * 0.9),
                      "protein": max(10.0, body.floor_protein * share * 1.15),
-                     "fibreMin": max(2.0, body.floor_fibre * share * 1.15)})
+                     "fibreMin": max(2.0, body.floor_fibre * share * 1.15)},
+            prefer_pool=breakfast_pool if sitting == "breakfast" else savoury_pool)
         for item in (fresh or []):
             name = str(item.get("name") or "").strip()[:300]
             if not name or name in existing:
@@ -1087,7 +1144,8 @@ def autoplan(
                     "protein": max(10.0, body.floor_protein * recipes.share_for(
                         sitting, body.meals_per_day, body.even_meals) * 1.15),
                     "fibreMin": max(2.0, body.floor_fibre * recipes.share_for(
-                        sitting, body.meals_per_day, body.even_meals) * 1.15)})
+                        sitting, body.meals_per_day, body.even_meals) * 1.15)},
+                prefer_pool=breakfast_pool if sitting == "breakfast" else savoury_pool)
         # Try the plan before committing anything. A rejected attempt used to
         # leave its dishes in the library anyway, so the *next* plan picked
         # them up and came out worse -- a failed experiment quietly poisoning

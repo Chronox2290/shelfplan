@@ -182,6 +182,84 @@ with TestClient(app) as c:
     check('undo brings the cleared list back',
           bool(c.get(f'/api/plans/{pid}').json()['data']['shop']))
 
+    print()
+    print('meal prep: a handful of things cooked once, not one recipe each')
+    # The user's own framing: "I built meal prep to use a bunch of
+    # ingredients to cover seven days worth of meals -- you aren't going to
+    # cook seven different recipes for that." Generating a week's worth of
+    # dishes should reuse a small pool of proteins and bases across several
+    # differently-named dishes, not roll a fresh one for every dish.
+    from src.supermarkets import recipes as recipe_lib
+    from src.supermarkets import weekplan
+
+    pool = {}
+    batch = recipe_lib.build_plan(
+        seed='test:pool:1', meals=5, servings=4,
+        kcal_per_serving=650, protein_per_serving=55,
+        diet='any', cuisine='any', meals_wanted=['lunch'],
+        prefer_pool=pool)
+    proteins = {r.get('protein') for r in batch}
+    check('five dishes for one sitting share at most two proteins',
+          len(proteins) <= 2, f'proteins used: {proteins}')
+    check('and at least one of them is reused across more than one dish',
+          any(sum(1 for r in batch if r.get('protein') == p) > 1
+              for p in proteins),
+          str([r['name'] for r in batch]))
+
+    # A week planned day by day can land a dish in exactly one sitting all
+    # week -- its own pack of something nothing else needs, cooked for a
+    # single serving. The repair pass should fold it into something already
+    # earning its place, when something suitable exists.
+    def mk(name, protein, kcal, p, fb=8.0, meals=('lunch', 'dinner')):
+        return {'id': name, 'name': name, 'protein': protein, 'meals': list(meals),
+                'perServing': {'kcal': kcal, 'p': p, 'c': 40.0, 'f': 15.0, 'fb': fb},
+                'ingredients': [{'food': protein, 'gramsPerServing': 180,
+                                 'pack': 500, 'aisle': 'meat'}]}
+    library = [
+        mk('Chicken bowl', 'Chicken breast, raw', 550, 45),
+        mk('Chicken traybake', 'Chicken breast, raw', 580, 48),
+        mk('Beef ragu', 'Beef mince, lean, raw', 600, 42),
+        mk('One-off tofu stirfry', 'Firm tofu', 500, 30),
+        mk('Oats', 'Rolled oats', 450, 30, fb=9.0, meals=('breakfast',)),
+    ]
+    goals = {'ceiling': 2000.0, 'floorP': 140.0, 'floorF': 25.0}
+    result = weekplan.plan_week(library, goals, days=7, meals_per_day=3,
+                                max_repeats=5, allow_seconds=True)
+    counts = {}
+    for day in result['days']:
+        for m in day['meals']:
+            counts[m['recipeId']] = counts.get(m['recipeId'], 0) + 1
+    singles = [rid for rid, n in counts.items() if n == 1]
+    check('nothing is left cooked for exactly one sitting when an '
+          'alternative already earning its place could cover it',
+          'One-off tofu stirfry' not in singles,
+          f'counts: {counts}')
+    check('dishesToCook is reported on the result',
+          isinstance(result.get('dishesToCook'), int) and result['dishesToCook'] > 0)
+
+    print()
+    print('a fresh account autoplans a genuinely shared pool')
+    c.post('/api/auth/register',
+           json={'email': 'poolcheck@example.com', 'password': 'a-long-enough-password'})
+    poolplan = c.post('/api/plans', json={'name': 'T', 'data': {}}).json()
+    pool_pid = poolplan['id']
+    auto = c.post(f'/api/plans/{pool_pid}/autoplan', json={
+        'ceiling': 2000, 'floor_protein': 140, 'floor_fibre': 25,
+        'meals_per_day': 3, 'max_repeats': 5, 'budget': 120, 'apply': True,
+    }).json()
+    lib_by_name = {r['name']: r for r in auto.get('library', [])}
+    cooked_names = set()
+    for day in auto['days']:
+        cooked_names.update(day.get('names', []))
+    proteins_used = {}
+    for name in cooked_names:
+        r = lib_by_name.get(name) or {}
+        proteins_used.setdefault(r.get('protein'), []).append(name)
+    check('a freshly generated week reuses at least one protein across two '
+          'different dishes rather than a fresh protein for every dish',
+          any(len(v) > 1 for v in proteins_used.values()),
+          f'{len(cooked_names)} dishes, {len(proteins_used)} distinct proteins')
+
 print()
 print('FAILED: ' + ', '.join(fails) if fails else 'all checks passed')
 sys.exit(1 if fails else 0)

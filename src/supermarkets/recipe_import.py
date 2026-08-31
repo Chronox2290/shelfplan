@@ -435,19 +435,25 @@ def _servings(value: Any) -> Optional[int]:
     return int(match.group()) if match else None
 
 
-def _duration(value: Any) -> str:
-    """ISO 8601 duration to something readable."""
+def _duration(value: Any) -> Tuple[str, Optional[int]]:
+    """ISO 8601 duration to (something readable, total minutes).
+
+    The minutes are what a Sunday cook sheet can actually schedule against;
+    the display string is what a person reads. Both come from the same parse
+    so they cannot disagree with each other.
+    """
     text = _text(value)
     match = re.match(r"^P(?:T)?(?:(\d+)H)?(?:(\d+)M)?", text)
     if not match or not (match.group(1) or match.group(2)):
-        return text
+        return text, None
     hours = int(match.group(1) or 0)
     minutes = int(match.group(2) or 0)
+    total = hours * 60 + minutes
     if hours and minutes:
-        return f"{hours}h {minutes}m"
+        return f"{hours}h {minutes}m", total
     if hours:
-        return f"{hours}h"
-    return f"{minutes} min"
+        return f"{hours}h", total
+    return f"{minutes} min", total
 
 
 def extract(html: str, url: str = "") -> Optional[Dict[str, Any]]:
@@ -469,13 +475,22 @@ def extract(html: str, url: str = "") -> Optional[Dict[str, Any]]:
                 raw_ingredients = [raw_ingredients]
             parts = [parse_ingredient(_text(line)) for line in raw_ingredients]
             author = node.get("author")
+            prep_text, prep_min = _duration(node.get("prepTime"))
+            cook_text, cook_min = _duration(node.get("cookTime"))
+            total_text, total_min = _duration(node.get("totalTime"))
             return {
                 "name": _text(node.get("name")) or "Imported recipe",
                 "author": _text(author.get("name") if isinstance(author, dict) else author),
                 "servings": _servings(node.get("recipeYield")),
-                "prepTime": _duration(node.get("prepTime")),
-                "cookTime": _duration(node.get("cookTime")),
-                "totalTime": _duration(node.get("totalTime")),
+                "prepTime": prep_text,
+                "cookTime": cook_text,
+                "totalTime": total_text,
+                # Minutes, for anything that schedules against them. None
+                # where the page did not say -- a guess here would show up as
+                # a confident number on a Sunday cook sheet.
+                "prepMinutes": prep_min,
+                "cookMinutes": cook_min,
+                "totalMinutes": total_min,
                 "cuisineText": _text(node.get("recipeCuisine")),
                 "ingredients": parts,
                 "steps": _steps(node.get("recipeInstructions")),
@@ -541,6 +556,20 @@ def fetch(url: str, timeout: int = 20) -> Dict[str, Any]:
     return {"status": "success", "recipe": recipe}
 
 
+def _scaled_grams(part: Dict[str, Any], scale: float) -> Optional[float]:
+    """The true weight of one line at the current serving count, or None.
+
+    Only when the weight is *known* -- from the unit itself, or from the
+    density table for a handful of common cooking liquids and staples.
+    Guessing from millilitres with no density (a cup of loosely-packed basil
+    leaves has no honest gram figure) is exactly how the app's own nutrition
+    and shopping figures went quietly wrong before, so this stays None rather
+    than assume water.
+    """
+    grams = part.get("grams")
+    return round(grams * scale, 1) if grams is not None else None
+
+
 def scale_recipe(recipe: Dict[str, Any], servings: Optional[int] = None,
                  system: str = "metric") -> Dict[str, Any]:
     """Re-present a recipe at a different serving count and measuring system."""
@@ -562,4 +591,8 @@ def scale_recipe(recipe: Dict[str, Any], servings: Optional[int] = None,
         # conversion disagrees with it.
         "original": [part.get("original", "")
                      for part in recipe.get("ingredients", [])],
+        # The number a nutrition estimate and a shopping line can actually use
+        # -- at THIS serving count, not the one the page was written for.
+        "scaledGrams": [_scaled_grams(part, factor)
+                        for part in recipe.get("ingredients", [])],
     }
