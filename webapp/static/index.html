@@ -175,6 +175,20 @@ button.pick:hover{border-color:var(--accent);background:var(--sunk)}
 .pick-meta .down{color:var(--accent)}
 .pick-meta{display:flex;gap:7px;flex:none;white-space:nowrap}
 
+/* the plan header on a phone ---------------------------------------------
+   Brand, a plan picker with a 180px floor, and four buttons in one wrapping
+   flex row is a different ragged shape at every width. Below 700px the picker
+   gets a row of its own and its buttons share it evenly, so it is one thing
+   with a shape rather than four things that happen to be adjacent. */
+@media (max-width:700px){
+  #planPicker{width:100%;gap:6px;order:3}
+  #planPicker #planSelect{flex:1 1 auto;min-width:0}
+  #planPicker button{flex:1 1 0;min-width:0;padding:9px 6px;white-space:nowrap}
+  .top-in{gap:9px;padding:10px 13px;row-gap:9px}
+  #userBox{margin-left:auto}
+  .who{display:none}
+}
+
 .goal-panel{margin:16px 0 0;padding:14px 15px;background:var(--sunk);
   border-radius:11px}
 
@@ -323,7 +337,7 @@ button.pick:hover{border-color:var(--accent);background:var(--accent-soft)}
 
 .thumb{width:46px;height:46px;border-radius:8px;object-fit:contain;flex:none;
   background:#fff;border:1px solid var(--hair)}
-.thumb.none{display:flex;align-items:center;justify-content:center;
+.thumb.none{display:flex;align-items:center;justify-content:center;font-size:22px;
   background:var(--sunk);color:var(--ink-3);font-family:Archivo,sans-serif;
   font-weight:600;font-size:17px}
 .prod-row{display:flex;gap:11px;align-items:flex-start}

@@ -1799,3 +1799,57 @@ already the class for a shopping-list row. The tag quietly inherited that row's
 `padding: 6px 0` and its bottom border, which is what squashed the pills flat
 against their text. Renamed to `when`, and the stylesheet guard now checks for
 it so the collision cannot come back unnoticed.
+
+## Pictures that never arrived
+
+Every thumbnail on the shopping list carried `loading="lazy"`, on the reasoning
+that a catalogue page can hold sixty of them and the store CDNs are slow. Inside
+these scrolling panels Chrome never decides they are near enough to load, so
+they sat for ever with a valid `src` and an empty `currentSrc`. The same fault
+had already been found on the imported recipe photograph; it was everywhere
+else too. A picture that never arrives is worth less than a slow one.
+
+## A picture that belonged to the wrong product
+
+The broccoli line showed a bag of Birds Eye frozen mixed vegetables long after
+the match itself had been corrected, because a refresh only ever *filled in* a
+missing picture:
+
+```python
+if result.get("image") and not shop.get(food, {}).get("image"):
+```
+
+So the first picture a line was given was the one it kept. Pictures and store
+links are now replaced along with the price they came with, and the price table
+returns the image belonging to whichever product it actually priced -- it had
+stopped returning one at all, which is why nothing corrected itself.
+
+## "Polenta 500g" is a filter, not a search
+
+The catalogue matches on every word, so an ingredient whose query carried a
+pack size could only ever match products whose label happened to repeat it.
+"Polenta 500g" excluded the 750g bag -- and because two 500g products *did*
+match, the widening fallback never fired and the better, cheaper pack was never
+a candidate. The size is stripped before the search now, not only when the
+search finds nothing.
+
+Widening it let tins in, which is how a recipe wanting cherry tomatoes was
+offered a tin of Mutti. Two things stop that: a candidate that is tinned,
+frozen or dried loses to a fresh one unless the plan asked for it kept that
+way; and where the store has said which department a product sits in, a produce
+ingredient is matched only against Fruit & Veg. `Mutti Whole Cherry Tomatoes`
+does not say "tinned" anywhere in its name, and the department is the only
+thing that reliably knows.
+
+## The Pack column
+
+Removed. It said `1000 g` for a cauliflower -- a costing unit, in a column
+headed as though it were a shelf pack -- while the product description beside
+it already gives the real pack size and the line underneath already says how
+much to buy. Three places for two facts, one of them wrong.
+
+## The plan header on a phone
+
+A brand, a picker with a 180px floor and four buttons in one wrapping flex row
+made a different ragged shape at every width. Below 700px the picker takes a
+row of its own and its buttons share it evenly.

@@ -689,6 +689,28 @@ def browse_recipes(
         limit=max(1, min(int(limit), 120)), offset=max(0, int(offset)))
 
 
+def _search_terms(food: str, query: str) -> List[str]:
+    """Ways to look a food up in the catalogue, widest useful first.
+
+    A pack size in a shopping query is a filter nobody intended: the catalogue
+    matches on every word, so "Chickpeas 400g tin" finds only tins whose label
+    happens to say 400g. The sized query is tried last rather than not at all,
+    since occasionally it is the only thing that matches.
+    """
+    unsized = " ".join(
+        word for word in query.split()
+        if not re.match(r"^\d+(?:\.\d+)?(?:g|kg|ml|l|pk)?$", word, re.I)
+        and word.lower() not in ("pack", "tin", "tins", "jar"))
+    plain = food.split(",")[0]
+    seen, out = set(), []
+    for term in (unsized, plain, " ".join(plain.split()[:2]), query):
+        term = (term or "").strip()
+        if term and term.lower() not in seen:
+            seen.add(term.lower())
+            out.append(term)
+    return out
+
+
 def ingredient_prices(session: Session) -> Dict[str, Dict[str, Any]]:
     """What each ingredient costs a pack, from the catalogue only.
 
@@ -706,21 +728,33 @@ def ingredient_prices(session: Session) -> Dict[str, Dict[str, Any]]:
     """
     out: Dict[str, Dict[str, Any]] = {}
     for food, meta in recipes.INGREDIENTS.items():
-        candidates = pricing.catalogue_search(
-            session, query=meta["query"], store="woolworths", limit=12)
-        products = candidates.get("products") or []
-        if not products:
-            # The full query carries words no label has -- "420g tin", "12
-            # pack" -- so fall back the same way the pictures do.
-            plain = food.split(",")[0]
-            for attempt in (plain, " ".join(plain.split()[:2])):
-                products = (pricing.catalogue_search(
-                    session, query=attempt, store="woolworths",
-                    limit=12).get("products") or [])
-                if products:
-                    break
+        # The pack size has to come out of the query before the search, not
+        # only when the search finds nothing. The catalogue requires every word
+        # to appear, so "Polenta 500g" quietly excludes the 750g bag -- and
+        # since two 500g products did match, the fallback never fired and the
+        # cheaper, better-matching pack was never even a candidate.
+        products = []
+        for attempt in _search_terms(food, meta["query"]):
+            products = pricing.catalogue_search(
+                session, query=attempt, store="woolworths",
+                limit=24).get("products") or []
+            if products:
+                break
         if not products:
             continue
+        # Fresh produce comes from the fruit and veg department. A tin of
+        # cherry tomatoes is named almost identically to a punnet of them --
+        # "Mutti Whole Cherry Tomatoes" does not say tinned anywhere -- so
+        # where the store has told us which aisle a product sits in, that is
+        # the only thing that can tell them apart. Only applied when some
+        # candidate actually carries a department, so a catalogue recorded
+        # before this existed behaves as it did.
+        if meta.get("aisle") == "produce":
+            fresh = [x for x in products
+                     if (x.get("department") or "").upper() == "FRUIT AND VEG"]
+            if fresh:
+                products = fresh
+
         result = resolve.resolve_from_products(
             food, meta["query"], products, target_pack_g=meta.get("pack"))
         if result.get("status") != "ok" or not result.get("price"):
@@ -749,18 +783,33 @@ def ingredient_prices(session: Session) -> Dict[str, Dict[str, Any]]:
             return (resolve.name_similarity(wanted, name) >= top
                     and not resolve.conflict_penalty(wanted, name)
                     and not resolve.form_penalty(wanted, name)
-                    and not resolve.processed_penalty(wanted, name))
+                    and not resolve.processed_penalty(wanted, name)
+                    # Without this a bag of frozen mixed vegetables could
+                    # undercut plain broccoli on price per kilo and take the
+                    # line, which is how the wrong picture got there.
+                    and not resolve.mixture_penalty(wanted, name)
+                    and not resolve.keeping_penalty(wanted, name))
 
         choices = [winner] + [
             a for a in (result.get("alternatives") or [])
             if a.get("pack_price") and a.get("per_kg") and as_good(a)]
         priced = [c for c in choices if c.get("pack_price") and c.get("per_kg")]
         best = min(priced, key=lambda c: c["per_kg"]) if priced else winner
+        # The picture belongs to whichever product was chosen, so it has to
+        # come from the same place the price did. Leaving it out is why a
+        # shopping line kept whatever image it was first given, however wrong.
+        picture = result.get("image") or ""
+        if best.get("name") and best["name"] != result.get("matched_name"):
+            match = next((x for x in products
+                          if x.get("name") == best["name"]), None)
+            picture = (match or {}).get("image") or ""
         out[food] = {
             "price": best.get("pack_price") or result["price"],
             "pack": best.get("pack_g") or meta.get("pack"),
             "product": best.get("name") or result.get("matched_name", ""),
             "perKg": best.get("per_kg") or result.get("per_kg"),
+            "image": picture,
+            "url": result.get("url") or "",
         }
     return out
 
@@ -1264,7 +1313,7 @@ def refresh_prices(
             else:
                 history.append(record)
             prices[food] = history
-            if pinned.get("image") and not shop.get(food, {}).get("image"):
+            if pinned.get("image"):
                 shop.setdefault(food, {})["image"] = pinned["image"]
             applied.append({"food": food, "price": record["price"],
                             "matched": record["matched"], "pinned": True})
@@ -1326,11 +1375,14 @@ def refresh_prices(
         else:
             history.append(record)
         prices[food] = history
-        # Lines added by hand or imported have no picture; a refresh is the
-        # natural moment to attach one from whatever product matched.
-        if result.get("image") and not shop.get(food, {}).get("image"):
+        # The picture and the link belong to the product that matched, so they
+        # are replaced rather than merely filled in. Only filling a blank meant
+        # a line matched wrongly once kept that product's photograph for good --
+        # a bag of frozen mixed vegetables sitting next to the word "Broccoli"
+        # long after the match itself had been corrected.
+        if result.get("image"):
             shop.setdefault(food, {})["image"] = result["image"]
-        if result.get("url") and not shop.get(food, {}).get("url"):
+        if result.get("url"):
             shop.setdefault(food, {})["url"] = result["url"]
         _record_price(session, user.id, result, body.store)
         applied.append(result)

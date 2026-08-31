@@ -1394,7 +1394,7 @@ function viewShop() {
             <div class="muted small">${howMuch(food, meta, p)}${
               p && p.matched ? ' &middot; ' + esc(p.matched) : ''}${link}</div>
             </div></div></td>
-          <td class="r num" data-label="Pack">${p && p.pack ? p.pack + ' g' : '&mdash;'}</td>
+
           <td class="r num" data-label="Price">${p && p.price
             ? money(p.price)
             : '<span class="muted small">no price yet</span>'}
@@ -1408,7 +1408,7 @@ function viewShop() {
             <button class="ghost tiny" data-drop="${esc(food)}" title="Remove from list">&times;</button></td>
         </tr>`;
       }).join('');
-      return `<tr class="aisle-row"><td colspan="5" class="aisle">${esc(aisle)}</td></tr>` + rows;
+      return `<tr class="aisle-row"><td colspan="4" class="aisle">${esc(aisle)}</td></tr>` + rows;
     }).join('');
 
   return `<div class="card">
@@ -1428,7 +1428,7 @@ function viewShop() {
     </div>
     <div id="refreshOut"></div>
     <div class="scroll"><table>
-      <thead><tr><th>Item</th><th class="r">Pack</th><th class="r">Price</th>
+      <thead><tr><th>Item</th><th class="r">Price</th>
         <th class="r">Per kg</th><th class="r">Store</th></tr></thead>
       <tbody>${sections}</tbody></table></div></div>
     ${savedListsPanel()}`;
@@ -2241,17 +2241,24 @@ function viewSearch() {
 }
 
 function thumb(p) {
-  // loading="lazy" matters: a catalogue page can hold sixty of these, and the
-  // store CDNs are slow enough that eager loading stalls the whole table.
+  // Deliberately not lazy. It was, on the reasoning that a catalogue page can
+  // hold sixty of these and the store CDNs are slow -- but inside these
+  // scrolling panels Chrome never decides they are near enough to load, so
+  // every thumbnail sat for ever at an empty currentSrc. A picture that never
+  // arrives is worth less than a slow one.
+  //
+  // A glyph rather than a letter, here as everywhere else, and it is what a
+  // broken store URL falls back to -- the common case for an image the
+  // catalogue recorded months ago.
+  const mark = foodGlyph(p.name)
+    || esc((p.name || '?').trim().charAt(0).toUpperCase());
   if (!p.image) {
-    return `<div class="thumb none" aria-hidden="true">${
-      esc((p.name || '?').trim().charAt(0).toUpperCase())}</div>`;
+    return `<div class="thumb none" aria-hidden="true">${mark}</div>`;
   }
-  return `<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy"
+  return `<img class="thumb" src="${esc(p.image)}" alt=""
     decoding="async" referrerpolicy="no-referrer"
     onerror="this.replaceWith(Object.assign(document.createElement('div'),
-      {className:'thumb none',textContent:${JSON.stringify(
-        (p.name || '?').trim().charAt(0).toUpperCase())}}))">`;
+      {className:'thumb none',textContent:${JSON.stringify(mark)}}))">`;
 }
 
 function resultRows(items, opts) {
@@ -2866,9 +2873,13 @@ function wireWeek() {
           history.push({
             price: known.price, pack: known.pack, date: today,
             store: 'Woolworths (online)', source: 'catalogue',
-            matched: known.product || '',
+            matched: known.product || '', url: known.url || '',
           });
           prices[food] = history;
+          // The picture comes from the same product as the price, so a line
+          // cannot end up showing one product and costing another.
+          if (known.image) totals[food].image = known.image;
+          if (known.url) totals[food].url = known.url;
           seeded += 1;
         });
         state.plan.data.prices = prices;
@@ -3718,7 +3729,10 @@ function foodPhoto(name, cls, fallbackSrc) {
       >${foodGlyph(name) || esc(label.slice(0, 1).toUpperCase())}</span>`;
   }
   return `<img class="food-pic ${cls || ''}" src="${esc(src)}" alt=""
-    loading="lazy" decoding="async">`;
+    decoding="async" onerror="this.replaceWith(Object.assign(
+      document.createElement('span'),
+      {className:'food-pic none ${cls || ''}',
+       textContent:${JSON.stringify(foodGlyph(name) || '')}}))">`;
 }
 
 // The dish in four pictures: what it is built on, then whatever else there is

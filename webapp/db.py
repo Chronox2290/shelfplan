@@ -229,6 +229,11 @@ class Product(Base):
     # The shelf's own before-price. Kept so a first reading can still be
     # told apart from a normal one, which history alone cannot do.
     was_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Which part of the shop it came from. A tin of cherry tomatoes and a
+    # punnet of them have near-identical names -- "Mutti Whole Cherry Tomatoes"
+    # says nothing about being tinned -- and the department is the only thing
+    # that reliably tells them apart.
+    department: Mapped[str] = mapped_column(String(60), default="")
     in_stock: Mapped[bool] = mapped_column(Boolean, default=True)
     url: Mapped[str] = mapped_column(String(400), default="")
     image: Mapped[str] = mapped_column(String(400), default="")
@@ -266,6 +271,12 @@ def _migrate(connection) -> None:
             connection.execute(text(
                 f"ALTER TABLE {table} ADD COLUMN was_price FLOAT"))
             connection.commit()
+
+    rows = connection.execute(text("PRAGMA table_info(products)")).fetchall()
+    if rows and not any(r[1] == "department" for r in rows):
+        connection.execute(text(
+            "ALTER TABLE products ADD COLUMN department VARCHAR(60) DEFAULT ''"))
+        connection.commit()
 
 
 def init_db() -> None:

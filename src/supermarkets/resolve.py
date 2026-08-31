@@ -95,7 +95,7 @@ _FORM_WORDS = frozenset("""
 relish chutney sauce paste pickle pickled dip juice powder seasoning
 spice stock soup crisp chip jerky marinade dressing jam spread flavoured
 flavour extract essence syrup cordial pesto salsa hummus dukkah rub
-chargrilled grilled antipasto sundried semidried confit
+chargrilled grilled antipasto sundried semidried confit popping
 """.split())
 
 
@@ -141,6 +141,27 @@ def mixture_penalty(wanted: str, candidate: str) -> float:
     if _JOINED.search(wanted or ""):
         return 0.0               # the plan asked for a mix
     return 1.0 if _JOINED.search(candidate or "") else 0.0
+
+
+# Ways a food is kept. A plan line that names one -- "Chickpeas, drained",
+# "Peas, frozen" -- is asking for that one and these do not apply. A line that
+# names none is asking for the fresh thing.
+_KEEPING = frozenset(
+    "canned tinned frozen dried dehydrated pickled preserved".split())
+_ASKED = _KEEPING | frozenset("fresh raw drained chilled".split())
+
+
+def keeping_penalty(wanted: str, candidate: str) -> float:
+    """Candidate is tinned or frozen where the plan asked for neither.
+
+    Dropping the pack size from a catalogue search widens it usefully and also
+    lets in the tinned version of everything: a recipe wanting cherry tomatoes
+    was offered a tin of Mutti. Fresh is the reading when nothing else is said.
+    """
+    want = _tokens(wanted)
+    if want & _ASKED - {"fresh", "raw", "chilled"}:
+        return 0.0             # the plan asked for it kept some way
+    return 1.0 if (_tokens(candidate) & _KEEPING) else 0.0
 
 
 def conflict_penalty(wanted: str, candidate: str) -> float:
@@ -244,7 +265,8 @@ def score(product: Dict[str, Any], wanted: str, target_g: Optional[float]) -> fl
          - 2.5 * conflict_penalty(wanted, name)
          - 3.0 * form_penalty(wanted, name)
          - 0.9 * processed_penalty(wanted, name)
-         - 0.8 * mixture_penalty(wanted, name))
+         - 0.8 * mixture_penalty(wanted, name)
+         - 0.7 * keeping_penalty(wanted, name))
 
     # Pack size counts in both directions. Gating it behind a name score meant
     # the only candidate it ever applied to was whichever had the shortest
@@ -399,6 +421,8 @@ def resolve_from_products(
         reasons.append("is a cut or treatment the plan did not ask for")
     if mixture_penalty(wanted, best.get("name", "")):
         reasons.append("is a mixture rather than the single ingredient")
+    if keeping_penalty(wanted, best.get("name", "")):
+        reasons.append("is tinned or frozen where the plan wanted it fresh")
     if clashes:
         reasons.append("contradicts a qualifier in the planned food")
     if similarity < 0.4:
