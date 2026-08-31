@@ -31,7 +31,7 @@ if depth > 0:
 # what an unclosed media query quietly takes away.
 needed = [".food-pic", ".recipe-strip", ".book-grid", ".book-tile", ".auto-day",
           ".scan-flash", ".shop-name", ".chip", ".saved-row", ".ing-line",
-          ".was", ".tag.meal", ".toast"]
+          ".was", ".tag.when", ".toast", ".fold"]
 depth = 0
 top_level = set()
 buf = ""

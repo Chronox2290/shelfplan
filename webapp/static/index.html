@@ -353,6 +353,12 @@ td.prod{min-width:250px}
   flex:none;display:block}
 .food-pic.none{display:flex;align-items:center;justify-content:center;
   color:var(--ink-3);font-family:Archivo;font-weight:600;line-height:1}
+/* A glyph needs to be nearly the size of the tile to read as a picture; a
+   letter wants to stay small and quiet. */
+.food-pic.none.tiny{font-size:14px}
+.food-pic.none.small{font-size:19px}
+.food-pic.none.tile{font-size:30px}
+.food-pic.none.big{font-size:34px}
 .food-pic.tiny{width:22px;height:22px;border-radius:5px;font-size:10px}
 .food-pic.small{width:30px;height:30px;font-size:12px}
 .food-pic.tile{width:54px;height:54px;font-size:17px}
@@ -572,6 +578,17 @@ details summary{cursor:pointer}
    though they have been sliced off. */
 .recipe-tags { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 15px; }
 .recipe-tags:empty { display: none; }
+
+/* A folded section keeps the heading looking like a heading and puts the
+   marker where a reader expects it. */
+.fold > summary { list-style: none; cursor: pointer; display: flex;
+  align-items: baseline; gap: 8px; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::after { content: "▾"; margin-left: auto; color: var(--ink-3);
+  font-size: 12px; }
+.fold[open] > summary::after { content: "▴"; }
+.fold > summary h4 { margin-bottom: 0; }
+.fold > summary:hover h4 { color: var(--ink-2); }
 .recipe-tags .tag { flex: none; max-width: 100%; }
 
 /* A grid stretches every cell to the tallest in its row, so a short recipe
@@ -632,7 +649,7 @@ body{font-size:17px;line-height:1.55;-webkit-text-size-adjust:100%}
 .muted.small,.sub{font-size:14.5px}
 label{font-size:13.5px;margin:0 0 6px}
 table{font-size:15.5px}
-.tag{font-size:12px;padding:3px 9px}
+.tag{font-size:12px;padding:5px 11px;line-height:1.25}
 .stat .k{font-size:12.5px}
 .stat .v{font-size:23px}
 .who{font-size:14px}
@@ -679,10 +696,12 @@ tr.got .shop-name{color:var(--ink-3);text-decoration:line-through}
 
 /* Meal-of-the-day markers. Colour separates them at a glance without needing
    to read the word. */
-.tag.meal{border-color:transparent}
-.tag.meal-breakfast{background:var(--warn-soft);color:var(--warn)}
-.tag.meal-lunch{background:var(--accent-soft);color:var(--accent)}
-.tag.meal-dinner{background:var(--sunk);color:var(--ink-2)}
+/* Named `when`, not `meal`: `.meal` is already a shopping-list row, and a tag
+   wearing both quietly inherited that row's padding and border. */
+.tag.when{border-color:transparent}
+.tag.when-breakfast{background:var(--warn-soft);color:var(--warn)}
+.tag.when-lunch{background:var(--accent-soft);color:var(--accent)}
+.tag.when-dinner{background:var(--sunk);color:var(--ink-2)}
 .sitting{display:inline-block;font-size:11.5px;font-weight:700;
   letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);
   margin-right:7px;vertical-align:1px}

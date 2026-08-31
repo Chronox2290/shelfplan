@@ -727,14 +727,28 @@ function recipeCard(r, opts) {
       <span class="num">${esc(per)}</span>${tot}</div>`;
   }).join('');
 
+  // In a grid of cards the method is what makes one three times the height of
+  // its neighbour, and it is not what you are scanning for -- you are looking
+  // for something to cook, and you read the method once you have chosen. So it
+  // folds away in the library and stays open where a single recipe is the
+  // whole point of the page.
+  const fold = o.library;
   const steps = (r.steps || []).length
-    ? `<h4>Method</h4><ol class="steps">${
-        r.steps.map((st) => `<li>${esc(st)}</li>`).join('')}</ol>` : '';
+    ? (fold
+      ? `<details class="fold"><summary><h4>Method</h4>
+           <span class="muted small">${r.steps.length} steps</span></summary>
+         <ol class="steps">${r.steps.map((st) => `<li>${esc(st)}</li>`).join('')}</ol>
+         </details>`
+      : `<h4>Method</h4><ol class="steps">${
+          r.steps.map((st) => `<li>${esc(st)}</li>`).join('')}</ol>`) : '';
 
+  const reheatBody = `${r.storage ? `<p class="muted small">${esc(r.storage)}</p>` : ''}
+       <ul class="steps">${(r.reheat || []).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`;
   const reheat = (r.reheat || []).length
-    ? `<h4>Storing and reheating</h4>
-       ${r.storage ? `<p class="muted small">${esc(r.storage)}</p>` : ''}
-       <ul class="steps">${r.reheat.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '';
+    ? (fold
+      ? `<details class="fold"><summary><h4>Storing and reheating</h4></summary>
+         ${reheatBody}</details>`
+      : `<h4>Storing and reheating</h4>${reheatBody}`) : '';
 
   // A saved recipe carries notes as the one string you typed; a freshly built
   // one carries the builder's list of what it could not quite hit. Calling
@@ -1301,6 +1315,38 @@ function gotSet() {
   return new Set(d.got);
 }
 
+// What to actually pick up. A cauliflower does not come in a one-kilogram
+// pack, so "2 packs, 1000g each" is a costing unit printed as a shopping
+// instruction. For anything sold by weight or by the each, say the weight.
+function howMuch(food, meta, price) {
+  const grams = Math.round(meta.grams || 0);
+  if (!grams) return '';
+  const weight = grams >= 1000
+    ? `${(grams / 1000).toFixed(grams % 1000 ? 1 : 0)} kg`
+    : `${grams} g`;
+
+  const matched = String((price && price.matched) || '');
+  const loose = meta.loose
+    || / each$| each\b|bunch|loose/i.test(matched)
+    || (LOOSE_LOOKING.has(food.split(',')[0].toLowerCase()) && !meta.pinned);
+  if (loose) return weight;
+
+  const packs = meta.packsNeeded || 1;
+  return packs > 1 ? `${weight} &middot; ${packs} packs` : weight;
+}
+
+// A fallback for lines built before the flag existed, and for anything typed
+// in by hand. Deliberately short: guessing wrongly here only costs the words
+// "2 packs", so it errs towards the plain weight.
+const LOOSE_LOOKING = new Set([
+  'banana', 'bananas', 'cauliflower', 'broccoli', 'cabbage', 'capsicum',
+  'zucchini', 'eggplant', 'cucumber', 'pumpkin', 'potato', 'sweet potato',
+  'carrot', 'carrots', 'onion', 'brown onion', 'tomato', 'tomatoes', 'leek',
+  'celery', 'lemon', 'lemons', 'garlic', 'avocado', 'kale', 'silverbeet',
+  'asparagus', 'bok choy', 'brussels sprouts',
+]);
+
+
 function viewShop() {
   const d = state.plan.data;
   const shop = d.shop || {};
@@ -1345,8 +1391,7 @@ function viewShop() {
             <div style="min-width:0"><label class="tick">
               <input type="checkbox" data-got="${esc(food)}"
               ${ticked ? 'checked' : ''}> <span class="shop-name">${esc(food)}</span></label>
-            <div class="muted small">${meta.grams ? meta.grams + ' g' : ''}${
-              packs > 1 ? ' &middot; ' + packs + ' packs' : ''}${
+            <div class="muted small">${howMuch(food, meta, p)}${
               p && p.matched ? ' &middot; ' + esc(p.matched) : ''}${link}</div>
             </div></div></td>
           <td class="r num" data-label="Pack">${p && p.pack ? p.pack + ' g' : '&mdash;'}</td>
@@ -2774,6 +2819,7 @@ function wireWeek() {
           const line = totals[i.food] || (totals[i.food] = {
             aisle: i.aisle || 'pantry', woo: i.query || i.food,
             pack: i.pack || null, grams: 0, usedIn: [],
+            loose: !!i.loose,
           });
           // What you eat, not what you cook. `m.servings` is already how many
           // servings that meal takes; multiplying by the batch size as well
@@ -3552,7 +3598,7 @@ function optionsFor(list, chosen) {
 function mealTag(r) {
   const meal = r && r.meal;
   if (!meal) return '';
-  return `<span class="tag meal meal-${esc(meal)}">${
+  return `<span class="tag when when-${esc(meal)}">${
     esc(meal[0].toUpperCase() + meal.slice(1))}</span>`;
 }
 
@@ -3602,6 +3648,56 @@ async function loadFoodImages(force) {
   return photos.loading;
 }
 
+// Longest match first, so "sweet potato" is not read as "potato" and "spring
+// onion" is not read as "onion".
+const GLYPHS = [
+  ['sweet potato', '🍠'], ['spring onion', '🧅'], ['brown onion', '🧅'],
+  ['red onion', '🧅'], ['bok choy', '🥬'], ['baby spinach', '🥬'],
+  ['brussels sprout', '🥬'], ['snow pea', '🫛'], ['green bean', '🫛'],
+  ['kidney bean', '🫘'], ['black bean', '🫘'], ['butter bean', '🫘'],
+  ['red lentil', '🫘'], ['brown lentil', '🫘'], ['chickpea', '🫘'],
+  ['cherry tomato', '🍅'], ['olive oil', '🫒'], ['sesame oil', '🫒'],
+  ['peanut butter', '🥜'], ['chia seed', '🌱'], ['whey protein', '🥛'],
+  ['greek yoghurt', '🥛'], ['cottage cheese', '🧀'], ['parmesan', '🧀'],
+  ['feta', '🧀'], ['haloumi', '🧀'], ['coconut milk', '🥥'],
+  ['curry paste', '🌶️'], ['smoked paprika', '🌶️'], ['garam masala', '🌶️'],
+  ['ground cumin', '🌶️'], ['dried oregano', '🌿'], ['fresh ginger', '🫚'],
+  ['tomato passata', '🍅'], ['soy sauce', '🍶'], ['fish sauce', '🍶'],
+  ['oyster sauce', '🍶'], ['miso', '🍶'], ['mirin', '🍶'],
+  ['stock cube', '🧊'], ['corn tortilla', '🌯'], ['wholemeal wrap', '🌯'],
+  ['wholegrain bread', '🍞'], ['rolled oats', '🥣'], ['polenta', '🌽'],
+  ['corn kernel', '🌽'], ['couscous', '🍚'], ['bulgur', '🍚'],
+  ['pearl barley', '🍚'], ['quinoa', '🍚'], ['basmati', '🍚'],
+  ['jasmine rice', '🍚'], ['brown rice', '🍚'], ['cauliflower rice', '🥦'],
+  ['zucchini noodle', '🥒'], ['konjac noodle', '🍜'], ['soba', '🍜'],
+  ['udon', '🍜'], ['egg noodle', '🍜'], ['rice noodle', '🍜'],
+  ['pasta', '🍝'], ['gnocchi', '🥟'], ['tofu', '🧊'],
+  ['chicken', '🍗'], ['turkey', '🍗'], ['beef', '🥩'], ['lamb', '🥩'],
+  ['pork', '🥓'], ['bacon', '🥓'], ['salmon', '🐟'], ['tuna', '🐟'],
+  ['white fish', '🐟'], ['prawn', '🦐'], ['egg', '🥚'], ['milk', '🥛'],
+  ['butter', '🧈'], ['tahini', '🥜'], ['almond', '🌰'],
+  ['broccoli', '🥦'], ['cauliflower', '🥦'], ['cabbage', '🥬'],
+  ['silverbeet', '🥬'], ['kale', '🥬'], ['lettuce', '🥬'],
+  ['spinach', '🥬'], ['capsicum', '🫑'], ['zucchini', '🥒'],
+  ['cucumber', '🥒'], ['eggplant', '🍆'], ['mushroom', '🍄'],
+  ['carrot', '🥕'], ['potato', '🥔'], ['pumpkin', '🎃'],
+  ['tomato', '🍅'], ['onion', '🧅'], ['garlic', '🧄'], ['leek', '🧅'],
+  ['celery', '🥬'], ['asparagus', '🥬'], ['banana', '🍌'],
+  ['berries', '🫐'], ['berry', '🫐'], ['avocado', '🥑'], ['lemon', '🍋'],
+  ['pea', '🫛'], ['corn', '🌽'], ['salt', '🧂'], ['flour', '🌾'],
+  ['oat', '🥣'], ['rice', '🍚'], ['bean', '🫘'], ['fish', '🐟'],
+  ['cheese', '🧀'], ['bread', '🍞'], ['oil', '🫒'], ['sauce', '🍶'],
+];
+
+function foodGlyph(name) {
+  const key = String(name || '').toLowerCase();
+  for (const [needle, glyph] of GLYPHS) {
+    if (key.includes(needle)) return glyph;
+  }
+  return '';
+}
+
+
 // Ingredient names carry the state they are bought in -- "Chicken breast, raw",
 // "Peas, frozen" -- which is right on a shopping list and noise under a photo.
 function shortFood(name) {
@@ -3614,8 +3710,12 @@ function foodPhoto(name, cls, fallbackSrc) {
   const src = photos.map[name] || fallbackSrc;
   const label = shortFood(name);
   if (!src) {
+    // A letter is not a picture of a cauliflower. Where the catalogue has no
+    // photograph -- a food nobody has searched for yet, or one the store
+    // ships without an image -- a glyph at least says what kind of thing it
+    // is, and needs nothing fetched to do it.
     return `<span class="food-pic none ${cls || ''}" aria-hidden="true"
-      >${esc(label.slice(0, 1).toUpperCase())}</span>`;
+      >${foodGlyph(name) || esc(label.slice(0, 1).toUpperCase())}</span>`;
   }
   return `<img class="food-pic ${cls || ''}" src="${esc(src)}" alt=""
     loading="lazy" decoding="async">`;
@@ -3659,9 +3759,7 @@ function recipeStrip(r) {
     if (wanted.length < 4 && !wanted.includes(i)) wanted.push(i);
   });
   if (!wanted.length) return '';
-  // Three big lettered squares are not a picture of anything. If the catalogue
-  // has no photograph for any of them, the card is better without the band.
-  if (!wanted.some((i) => photos.map[i.food] || i.image)) return '';
+
 
   return `<div class="recipe-strip">${wanted.map((i) => `
     <figure class="strip-cell">

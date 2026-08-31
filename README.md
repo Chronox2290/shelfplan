@@ -1755,3 +1755,47 @@ The tags under the title had no room above them and butted straight into the
 header's rule, which is what made them look sliced off. And a card whose
 ingredients have no photographs no longer shows a band of three big lettered
 squares: they are not a picture of anything, and the card reads better without.
+
+## Two packs of cauliflower
+
+Nobody has ever picked up a one-kilogram pack of cauliflower. The `pack` figure
+on an ingredient is a costing unit -- what a kilo of it costs -- and the
+shopping list was printing it as a shopping instruction.
+
+Twenty-four foods are now marked as sold by weight or by the each, and for
+those the list says **how much** rather than **how many**:
+
+```
+Banana          1.1 kg          Cavendish Bananas each
+Cabbage         2.1 kg          Green Cabbage Quarter each
+Turkey mince    3.2 kg · 7 packs   Ingham's Turkey Mince 500g
+```
+
+The mince really does come in packs, so it still counts them.
+
+## A picture of a cauliflower
+
+Where the catalogue has no photograph -- a food nobody has searched for yet, or
+one the store ships without an image -- the tile showed the food's first
+letter, which is a picture of nothing. It now shows a glyph for what kind of
+thing it is: 🥦 for the cauliflower, 🍌 for the banana, 🍗 for the chicken.
+Longest match first, so "sweet potato" is not read as "potato".
+
+Nothing is fetched to do this, which is why it could be done for every
+ingredient at once rather than only the ones the catalogue happens to know.
+
+## Cards that are roughly the same size
+
+Folding the method away in the library took the spread from 545–1038px to
+608–649px. It is not what you are scanning for -- you are looking for something
+to cook, and you read the method once you have chosen -- so it sits behind a
+heading that says how many steps there are. Where a single recipe *is* the
+page, it stays open.
+
+## A tag wearing two hats
+
+The meal-of-the-day tag was `class="tag meal meal-breakfast"`, and `.meal` was
+already the class for a shopping-list row. The tag quietly inherited that row's
+`padding: 6px 0` and its bottom border, which is what squashed the pills flat
+against their text. Renamed to `when`, and the stylesheet guard now checks for
+it so the collision cannot come back unnoticed.

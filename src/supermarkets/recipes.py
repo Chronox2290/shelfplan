@@ -802,6 +802,26 @@ for _name, _meta in INGREDIENTS.items():
 del _name, _meta
 
 
+# Things you buy by weight or by the each rather than in a packet. Their `pack`
+# figure is a costing unit -- what a kilo of it costs -- and printing it on a
+# shopping list as "2 packs, 1000g each" is nonsense: nobody has ever picked up
+# a one-kilogram pack of cauliflower. For these the list says how much to buy,
+# not how many to buy.
+LOOSE = frozenset([
+    "Capsicum, raw", "Zucchini, raw", "Carrot, raw", "Pumpkin, raw",
+    "Eggplant, raw", "Cabbage, raw", "Banana", "Avocado", "Cauliflower, raw",
+    "Cucumber, raw", "Celery, raw", "Brown onion, raw", "Tomato, raw",
+    "Leek, raw", "Broccoli, raw", "Sweet potato, raw", "Potato, raw",
+    "Brussels sprouts, raw", "Silverbeet, raw", "Kale, raw", "Bok choy",
+    "Asparagus, raw", "Lemon", "Garlic",
+])
+
+for _name, _meta in INGREDIENTS.items():
+    if _name in LOOSE:
+        _meta["loose"] = True
+del _name, _meta
+
+
 # Minimum sensible amounts per serving, in grams.
 _VEG_PER_SERVE = 150.0
 # As much veg as anyone will put in one container. Past this the honest answer
@@ -1446,6 +1466,9 @@ def build_recipe(
                 "query": INGREDIENTS[name]["query"],
                 "pack": INGREDIENTS[name]["pack"],
                 "aisle": INGREDIENTS[name].get("aisle", "pantry"),
+                # So a shopping list can say how much to buy rather than how
+                # many packs of something that does not come in packs.
+                "loose": bool(INGREDIENTS[name].get("loose")),
             }
             for name, grams in sorted(
                 per_serve.items(), key=lambda kv: -kv[1])
