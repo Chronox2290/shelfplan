@@ -1047,3 +1047,32 @@ reach a tailnet-only hostname, so system-level domain verification will not
 complete. Chrome performs its own asset-links check from the device, which
 can reach it -- so the app still runs without a browser bar. On a publicly
 resolvable domain both checks pass.
+
+## A note on rate limiting behind a proxy
+
+Tailscale's proxy rewrites `X-Forwarded-For` to the **server's own** tailnet
+address rather than the caller's, so with `--proxy-headers` every device
+collapses onto one key. A per-IP limit then silently becomes a limit shared by
+everyone, and the first person to fumble a password reset locks out the rest.
+
+The fix is to key on identity rather than address. Tailscale passes the
+signed-in user as `Tailscale-User-Login`, which is both correct and more useful
+than an IP:
+
+```
+tailscale-user-login: someone@example.com   ->   key "ts:someone@example.com"
+```
+
+That header is used **only** as a rate-limit key, never for authentication. It
+can be forged by anyone able to reach the port directly, which would let them
+dodge their own limit -- an annoyance, not a way in. Authentication remains the
+signed session cookie and nothing else.
+
+The limits themselves were also far too tight for a household: three password
+resets an hour is fewer than most people take to work out what they are doing.
+They now default to 10 per account and 20 per address per hour, and a refusal
+says "try again in 58 minutes" rather than "3541 seconds".
+
+Counters live in the serving process, so `docker compose exec ... reset_all()`
+does nothing -- that starts a *separate* process. Restarting the container is
+what clears them.

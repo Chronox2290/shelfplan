@@ -293,11 +293,15 @@ def forgot_password(
             _reset_link(request, token), passwords.TOKEN_TTL_MINUTES)
         mailer.send(user.email, subject, text)
 
+    where = (f" Sent from {mailer.SMTP_FROM}; check the spam folder if it does "
+             f"not appear." if mailer.configured()
+             else " This server has no mail set up, so the link is in its log "
+                  "-- ask whoever runs it.")
     return {
         "ok": True,
         "message": ("If that address has an account, a reset link is on its "
-                    "way. The link expires in "
-                    f"{passwords.TOKEN_TTL_MINUTES} minutes."),
+                    f"way. The link expires in {passwords.TOKEN_TTL_MINUTES} "
+                    f"minutes.{where}"),
         "mailConfigured": mailer.configured(),
     }
 

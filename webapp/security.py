@@ -106,40 +106,54 @@ def _int_env(name: str, default: int) -> int:
 
 # Per-IP, so one abusive client cannot lock out everybody. The per-account
 # limiter below is what stops a distributed guess against one known email.
-login_by_ip = SlidingWindow(_int_env("RATE_LOGIN_PER_IP", 20), 15 * 60)
-login_by_account = SlidingWindow(_int_env("RATE_LOGIN_PER_ACCOUNT", 8), 15 * 60)
+login_by_ip = SlidingWindow(_int_env("RATE_LOGIN_PER_IP", 40), 15 * 60)
+login_by_account = SlidingWindow(_int_env("RATE_LOGIN_PER_ACCOUNT", 10), 15 * 60)
 register_by_ip = SlidingWindow(_int_env("RATE_REGISTER_PER_IP", 5), 60 * 60)
 # Price lookups leave this server's IP at the supermarkets, so a busy user can
 # get everyone blocked. Cheap ceiling to keep one account from doing that.
 refresh_by_user = SlidingWindow(_int_env("RATE_REFRESH_PER_USER", 12), 60 * 60)
 # Reset requests send mail and cost an Argon2 hash on redemption. Limited per
 # address as well as per IP so one account cannot be mail-bombed from a botnet.
-forgot_by_ip = SlidingWindow(_int_env("RATE_FORGOT_PER_IP", 5), 60 * 60)
-forgot_by_account = SlidingWindow(_int_env("RATE_FORGOT_PER_ACCOUNT", 3), 60 * 60)
-reset_by_ip = SlidingWindow(_int_env("RATE_RESET_PER_IP", 10), 60 * 60)
+forgot_by_ip = SlidingWindow(_int_env("RATE_FORGOT_PER_IP", 20), 60 * 60)
+forgot_by_account = SlidingWindow(_int_env("RATE_FORGOT_PER_ACCOUNT", 10), 60 * 60)
+reset_by_ip = SlidingWindow(_int_env("RATE_RESET_PER_IP", 30), 60 * 60)
 # Each import fetches somebody else's page from this server's address. A cap
 # keeps one enthusiastic user from making the server look like a crawler.
 import_by_user = SlidingWindow(_int_env("RATE_IMPORT_PER_USER", 40), 60 * 60)
 
 
 def client_ip(request: Request) -> str:
-    """The caller's address.
+    """A key identifying the caller, for rate limiting only.
 
-    Behind a proxy this is only correct when the server runs with
-    --proxy-headers, which rewrites request.client from X-Forwarded-For. The
-    header is NOT read directly here: trusting it unconditionally would let
-    anyone spoof their way past the limiter by setting it themselves.
+    Never use this for authentication. A header can be forged by anyone who can
+    reach the port directly, which would let them dodge their own rate limit --
+    an annoyance, not a way in. Authentication is the signed session cookie and
+    nothing else.
+
+    Tailscale's proxy rewrites X-Forwarded-For to the *server's* own tailnet
+    address rather than the caller's, so every device collapses onto one key
+    and a per-IP limit silently becomes a limit shared by the whole household.
+    It does pass the signed-in user, though, which is a better key than an
+    address anyway.
     """
+    who = (request.headers.get("tailscale-user-login") or "").strip()
+    if who:
+        return f"ts:{who.lower()}"
     return request.client.host if request.client else "unknown"
 
 
 def enforce(window: SlidingWindow, key: str, what: str) -> None:
     allowed, retry_in = window.check(key)
     if not allowed:
+        # Minutes read better than "3541 seconds", which is what an hour-long
+        # window produces and which reads like something is broken.
+        seconds = int(retry_in) + 1
+        when = (f"{seconds} seconds" if seconds < 90
+                else f"{round(seconds / 60)} minutes")
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
-            f"Too many {what}. Try again in {int(retry_in) + 1} seconds.",
-            headers={"Retry-After": str(int(retry_in) + 1)},
+            f"Too many {what}. Try again in {when}.",
+            headers={"Retry-After": str(seconds)},
         )
 
 
