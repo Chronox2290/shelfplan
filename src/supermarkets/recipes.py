@@ -1495,6 +1495,34 @@ _WEIGHTS = {"kcal": 1.0, "protein": 1.6, "carbMax": 0.9,
             "fatMax": 0.9, "fibreMin": 1.4}
 
 
+def serving_cost(recipe: Dict[str, Any],
+                 prices: Optional[Dict[str, Dict[str, Any]]]) -> Optional[float]:
+    """What one serving's ingredients cost, at the per-kilo rate.
+
+    Not what the shopping costs -- that is packs, and the planner works that
+    out. This is the fair way to compare two recipes: a dish built on tuna
+    steak at $27/kg and one built on kidney beans at $5/kg are not equivalent
+    just because they carry the same protein.
+    """
+    if not prices:
+        return None
+    total = 0.0
+    known = 0
+    for part in recipe.get("ingredients", []):
+        price = prices.get(part.get("food"))
+        grams = float(part.get("gramsPerServing") or 0)
+        if not price or grams <= 0:
+            continue
+        per_kg = price.get("perKg")
+        if not per_kg and price.get("price") and price.get("pack"):
+            per_kg = price["price"] * 1000.0 / price["pack"]
+        if not per_kg:
+            continue
+        total += per_kg * grams / 1000.0
+        known += 1
+    return round(total, 2) if known else None
+
+
 def score_against(macros: Dict[str, float], targets: Dict[str, Any]) -> float:
     """Penalty for a recipe against the targets. Lower is better."""
     penalty = 0.0
@@ -1560,8 +1588,17 @@ def build_best(
     tries: int = 14,
     start_offset: int = 0,
     meal: Optional[str] = None,
+    prices: Optional[Dict[str, Dict[str, Any]]] = None,
+    cost_ceiling: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Build several candidates and return the one that best fits the targets."""
+    """Build several candidates and return the one that best fits the targets.
+
+    With prices, "best" includes what it costs. A week of forty grams of
+    protein a meal can be built on tuna steak or on chicken and kidney beans,
+    and the difference across twenty-one meals is several hundred dollars --
+    which the old scoring could not see at all, because it only ever looked at
+    the macros.
+    """
     t = {**DEFAULT_TARGETS, **(targets or {})}
     if diet == "keto" and t.get("carbMax") is None:
         t["carbMax"] = KETO_CARBS_PER_SERVING
@@ -1575,10 +1612,25 @@ def build_best(
         if candidate is None:
             continue
         penalty = score_against(candidate["perServing"], t)
+        cost = serving_cost(candidate, prices)
+        if cost is not None:
+            candidate["servingCost"] = cost
+            if cost_ceiling:
+                # What counts is not what a serving costs but what its protein
+                # costs. Penalising the plain price pushed the builder onto
+                # beans and grains -- cheap, and nowhere near 150g a day. A
+                # $4 serving carrying 55g of protein is better value than a $2
+                # one carrying 20g, and that is the choice the old plan made
+                # over and over: whey, yoghurt, chicken breast, lean mince.
+                protein = max(1.0, candidate["perServing"].get("p") or 0.0)
+                rate = cost / protein
+                candidate["costPerProtein"] = round(rate, 4)
+                over = max(0.0, rate - cost_ceiling) / cost_ceiling
+                penalty += 1.6 * over + 0.3 * (rate / cost_ceiling)
         if best_score is None or penalty < best_score:
             best, best_score = candidate, penalty
-        if penalty < 0.05:      # close enough; stop burning effort
-            break
+        if penalty < 0.05 and not cost_ceiling:
+            break               # close enough; stop burning effort
     if best is None:
         return None
     best["targets"] = {k: v for k, v in t.items() if v is not None}
@@ -1601,6 +1653,8 @@ def build_plan(
     cuisine: str = "any",
     targets: Optional[Dict[str, Any]] = None,
     meals_wanted: Optional[Sequence[str]] = None,
+    prices: Optional[Dict[str, Dict[str, Any]]] = None,
+    cost_ceiling: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Build several distinct recipes for one week's prep.
 
@@ -1625,7 +1679,9 @@ def build_plan(
         # Try well past the quota so exclusions cannot silently return short.
         while made < quota and offset < max(8, quota * 8):
             recipe = build_best(seed, goals, servings, diet, exclude, cuisine,
-                                tries=4, start_offset=offset, meal=meal)
+                                tries=8 if prices else 4, start_offset=offset,
+                                meal=meal, prices=prices,
+                                cost_ceiling=cost_ceiling)
             offset += 4
             if not recipe:
                 continue

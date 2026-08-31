@@ -772,7 +772,17 @@ const CAT_LABEL = { chicken: 'Chicken', beef: 'Beef', pork: 'Pork',
                     vegetarian: 'Vegetarian', other: 'Other' };
 const CAT_ORDER = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'vegetarian', 'other'];
 
-const week = { picker: null, monday: null };
+const week = {
+  picker: null,
+  monday: null,
+  // Whether each meal lists what goes in it. On by default: seeing the day is
+  // the point of a plan, and a name on its own does not tell you what Tuesday
+  // involves.
+  detail: (() => {
+    try { return localStorage.getItem('shelfplan.weekDetail') !== '0'; }
+    catch (_) { return true; }
+  })(),
+};
 
 // A day is judged against a ceiling you should stay under and floors you
 // should get past -- which is how people actually eat, rather than hitting an
@@ -889,8 +899,21 @@ function viewWeek() {
 
     const rows = (day.meals || []).map((m, mi) => {
       const r = recipeById(m.recipeId);
-      if (!r) return '';
+      if (!r) {
+        // A planned meal whose recipe has gone -- deleted, or belonging to
+        // another plan. It used to render as nothing at all, so a day quietly
+        // came up a meal short with no way to tell why.
+        return `<div class="meal planned missing">
+          <span class="meal-name">${m.meal
+            ? `<span class="sitting">${esc(m.meal)}</span>` : ''}
+            <span class="muted">This recipe is no longer in your library</span></span>
+          <div class="meal-controls">
+            <button class="ghost tiny" data-rm="${di}:${mi}"
+              title="Remove">&times;</button></div>
+        </div>`;
+      }
       const per = r.perServing || {};
+      const mult = m.servings || 1;
       const off = m.on === false;
       return `<div class="meal planned${off ? ' off' : ''}">
         <label class="tick" title="${off ? 'Skipped' : 'Eating this'}">
@@ -902,9 +925,14 @@ function viewWeek() {
         <div class="meal-controls">
           <input type="number" class="mult" data-mult="${di}:${mi}"
             value="${m.servings || 1}" min="1" max="9" title="Servings">
-          <span class="muted num small">${Math.round((per.kcal || 0) * (m.servings || 1))} kcal</span>
           <button class="ghost tiny" data-rm="${di}:${mi}" title="Remove">&times;</button>
         </div>
+        <div class="meal-macros num">
+          <b>${Math.round((per.kcal || 0) * mult)}</b> kcal
+          &middot; <b>${Math.round((per.p || 0) * mult)}</b> g protein
+          &middot; <b>${Math.round((per.fb || 0) * mult)}</b> g fibre
+        </div>
+        ${week.detail ? mealIngredients(r, mult) : ''}
       </div>`;
     }).join('');
 
@@ -914,8 +942,19 @@ function viewWeek() {
         ${goalBar('fibre', t.fb, g.floorF, 'floor')}
       </div>` : '';
 
+    const dayLine = t.meals ? `<div class="day-line num">
+        <span><b>${Math.round(t.kcal)}</b> kcal</span>
+        <span class="${t.p >= g.floorP ? 'hit' : 'short'}"><b>${
+          Math.round(t.p)}</b> g protein</span>
+        <span><b>${Math.round(t.c || 0)}</b> g carb</span>
+        <span><b>${Math.round(t.f || 0)}</b> g fat</span>
+        <span class="${t.fb >= g.floorF ? 'hit' : 'short'}"><b>${
+          Math.round(t.fb)}</b> g fibre</span>
+      </div>` : '';
+
     return `<div class="day${isToday(date) ? ' today' : ''}">
       <h3><span>${esc(day.day)}</span><span class="muted num">${shortDate(date)}</span></h3>
+      ${dayLine}
       ${rows || '<p class="muted small" style="margin:4px 0">Nothing planned.</p>'}
       ${summary}
       <button class="tiny add-day" data-pick="${di}">+ Add a meal</button>
@@ -948,6 +987,9 @@ function viewWeek() {
     <div class="row" style="margin-top:12px">
       <button id="weekShop" class="primary">Build shopping list</button>
       <button id="autoOpen">Plan it for me</button>
+      <button id="weekDetail" class="ghost"
+        title="Show what goes into each meal">${
+        week.detail ? 'Hide ingredients' : 'Show ingredients'}</button>
       <button id="weekClear" class="ghost">Clear week</button>
       <button id="planUndo" class="ghost" title="Restore the previous version of this plan">Undo</button>
     </div>
@@ -2045,6 +2087,15 @@ function wireWeek() {
     render();
   });
 
+  const detail = $('weekDetail');
+  if (detail) detail.addEventListener('click', () => {
+    week.detail = !week.detail;
+    try {
+      localStorage.setItem('shelfplan.weekDetail', week.detail ? '1' : '0');
+    } catch (_) { /* a private window just forgets the preference */ }
+    render();
+  });
+
   const undo = $('planUndo');
   if (undo) {
     undo.addEventListener('click', async () => {
@@ -2912,6 +2963,19 @@ function foodPhoto(name, cls, fallbackSrc) {
 // you nothing about the meal.
 // One picture is enough on a planned day -- the row is already carrying a
 // name, a serving count and a calorie figure.
+// The ingredient list, at the servings actually planned for that day. This is
+// the part that makes a day readable: "chicken 200g, rice 55g, broccoli 150g"
+// tells you what Tuesday is in a way that "Chicken and rice bowl" does not.
+function mealIngredients(r, mult) {
+  const items = (r.ingredients || []).filter((i) => i.gramsPerServing);
+  if (!items.length) return '';
+  return `<ul class="meal-ing num">${items.map((i) => `<li>
+      <span>${esc(shortFood(i.food))}</span>
+      <span>${Math.round(i.gramsPerServing * mult)} g</span>
+    </li>`).join('')}</ul>`;
+}
+
+
 function mealThumb(r) {
   const items = (r.ingredients || []);
   const lead = items.find((i) => i.role === 'protein')
@@ -3163,7 +3227,9 @@ function autoPanel() {
       <div><label for="aMeals">Meals a day</label>
         <input id="aMeals" type="number" value="3" min="1" max="6"></div>
       <div><label for="aRepeat">Same dish, at most</label>
-        <input id="aRepeat" type="number" value="3" min="1" max="14"></div>
+        <input id="aRepeat" type="number" value="5" min="1" max="14"></div>
+      <div><label for="aBudget">Week's shopping, at most ($)</label>
+        <input id="aBudget" type="number" value="120" min="20" max="2000" step="10"></div>
       <div><label for="aCuisine">Theme for anything new</label>
         <select id="aCuisine">${(state.cuisines || [{ id: 'any', label: 'No theme' }])
           .map((c) => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}
@@ -3204,10 +3270,30 @@ function autoSummary(res) {
     </div>`;
   }).join('');
 
+  const spend = res.estimatedCost != null ? `<div class="spend">
+      <div class="spend-row">
+        <span>At the till</span><b class="num">${money(res.estimatedCost)}</b></div>
+      <div class="spend-row">
+        <span>Eaten this week</span><b class="num">${money(res.eatenCost)}</b></div>
+      <div class="spend-row muted">
+        <span>Pack you keep</span><span class="num">${money(res.leftOverCost)}</span></div>
+      ${(res.mostlyLeftOver || []).length ? `<div class="muted small"
+        style="margin-top:8px">Mostly left over: ${res.mostlyLeftOver.map((x) =>
+          `${esc(shortFood(x.food))} ${money(x.spend)} (${x.usedPercent}% used)`)
+          .join(' &middot; ')}</div>` : ''}
+    </div>` : '';
+
   return `<div class="row" style="align-items:baseline;margin-bottom:6px">
       <h4 style="margin:0;flex:1">What it planned</h4>
       <button class="ghost tiny" id="aDismiss">Hide this</button></div>
     <p class="note">${esc(res.message || '')}</p>
+    ${spend}
+    ${res.budget && res.eatenCost && res.eatenCost > res.budget
+      && !res.cheaperRoundAdded ? `<div class="warn" style="margin-top:10px">
+      Your saved recipes are what makes this expensive -- the planner can only
+      choose from them, and cheaper ones it composed did not hold the targets.
+      Deleting the dearer recipes and planning again lets it build to the
+      budget from scratch.</div>` : ''}
     <div class="auto-days">${rows}</div>`;
 }
 
@@ -3237,6 +3323,7 @@ function wireAuto() {
         max_repeats: Number($('aRepeat').value) || 3,
         cuisine: ($('aCuisine') || {}).value || 'any',
         diet: ($('aDiet') || {}).value || 'any',
+        budget: Number($('aBudget').value) || null,
         apply: true,
       };
       auto.result = await api('/plans/' + state.planId + '/autoplan',

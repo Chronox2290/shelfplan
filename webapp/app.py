@@ -169,11 +169,17 @@ class AutoPlanRequest(BaseModel):
     ceiling: float = Field(default=2000, ge=800, le=6000)
     floor_protein: float = Field(default=150, ge=20, le=400)
     floor_fibre: float = Field(default=25, ge=5, le=100)
-    max_repeats: int = Field(default=3, ge=1, le=14)
+    # Meal prep repeats on purpose, and repetition is most of what keeps a
+    # trolley affordable: every extra distinct dish is another pack of
+    # something. Three was a variety setting dressed up as a prep one.
+    max_repeats: int = Field(default=5, ge=1, le=14)
     apply: bool = Field(default=False, description="Write it into the plan.")
     # Used only when the library is too thin and dishes have to be composed.
     cuisine: str = Field(default="any", max_length=40)
     diet: str = Field(default="any", max_length=20)
+    # What the week's shopping should come to. Meal prep is repetitive on
+    # purpose, and repetition is what keeps a trolley affordable.
+    budget: Optional[float] = Field(default=None, ge=20, le=2000)
 
 
 class RebalanceRequest(BaseModel):
@@ -664,6 +670,93 @@ def browse_recipes(
         limit=max(1, min(int(limit), 120)), offset=max(0, int(offset)))
 
 
+def ingredient_prices(session: Session) -> Dict[str, Dict[str, Any]]:
+    """What each ingredient costs a pack, from the catalogue only.
+
+    Read entirely from what has already been fetched, because this runs while
+    somebody is waiting for a week to be planned -- ninety live lookups would
+    take four minutes and get the address blocked. An ingredient the catalogue
+    has never seen has no price, and the planner treats it as free rather than
+    refusing to plan.
+
+    The match comes from the resolver rather than the plainest name in the
+    catalogue. Taking the shortest name priced chicken breast off an 80g packet
+    of sliced deli meat and then divided it into a one-kilo pack, which is the
+    kind of arithmetic that makes a budget meaningless. Price and pack size are
+    always taken from the same product, for the same reason.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    for food, meta in recipes.INGREDIENTS.items():
+        candidates = pricing.catalogue_search(
+            session, query=meta["query"], store="woolworths", limit=12)
+        products = candidates.get("products") or []
+        if not products:
+            # The full query carries words no label has -- "420g tin", "12
+            # pack" -- so fall back the same way the pictures do.
+            plain = food.split(",")[0]
+            for attempt in (plain, " ".join(plain.split()[:2])):
+                products = (pricing.catalogue_search(
+                    session, query=attempt, store="woolworths",
+                    limit=12).get("products") or [])
+                if products:
+                    break
+        if not products:
+            continue
+        result = resolve.resolve_from_products(
+            food, meta["query"], products, target_pack_g=meta.get("pack"))
+        if result.get("status") != "ok" or not result.get("price"):
+            continue
+
+        # For a budget, the cheapest kilo among the products that are plainly
+        # the same thing beats the one whose pack happens to match the plan.
+        # Someone shopping to a number buys the kilo of chicken breast, not the
+        # 450g organic pack that sits closer to the recipe's portion.
+        wanted = f'{meta["query"]} {food}'
+        winner = {"name": result.get("matched_name"),
+                  "pack_g": result.get("gross_pack_g") or result.get("pack"),
+                  "per_kg": result.get("per_kg"),
+                  "pack_price": result.get("price")}
+        top = resolve.name_similarity(wanted, winner["name"] or "")
+
+        def as_good(alt: Dict[str, Any]) -> bool:
+            """Only a product that is equally the right thing may undercut it.
+
+            Cheapest-of-the-alternatives on its own priced chicken breast off a
+            prosciutto-wrapped ready meal: the alternatives are the second to
+            fourth best matches, and second best can be something else
+            entirely.
+            """
+            name = alt.get("name") or ""
+            return (resolve.name_similarity(wanted, name) >= top
+                    and not resolve.conflict_penalty(wanted, name)
+                    and not resolve.form_penalty(wanted, name)
+                    and not resolve.processed_penalty(wanted, name))
+
+        choices = [winner] + [
+            a for a in (result.get("alternatives") or [])
+            if a.get("pack_price") and a.get("per_kg") and as_good(a)]
+        priced = [c for c in choices if c.get("pack_price") and c.get("per_kg")]
+        best = min(priced, key=lambda c: c["per_kg"]) if priced else winner
+        out[food] = {
+            "price": best.get("pack_price") or result["price"],
+            "pack": best.get("pack_g") or meta.get("pack"),
+            "product": best.get("name") or result.get("matched_name", ""),
+            "perKg": best.get("per_kg") or result.get("per_kg"),
+        }
+    return out
+
+
+@app.get("/api/ingredient-prices")
+def ingredient_price_table(
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """The table above, for anything that wants to show its working."""
+    table = ingredient_prices(session)
+    return {"prices": table, "count": len(table),
+            "of": len(recipes.INGREDIENTS)}
+
+
 @app.get("/api/nutrition/estimate")
 def estimate_nutrition(
     name: str = Query(..., min_length=1, max_length=200),
@@ -852,6 +945,17 @@ def autoplan(
     # twelve recipes and no breakfasts, so the count said "enough" and the
     # planner produced seven days of lunch and dinner with the morning empty.
     # What has to be enough is each sitting separately.
+    prices = ingredient_prices(session)
+    # A budget is really a limit on what protein may cost, because protein is
+    # what the week is built around and what most of the money goes on. Three
+    # quarters of the straight division leaves room for pack rounding: a
+    # recipe's ingredients cost less than the packs you have to buy to get
+    # them.
+    protein_rate = None
+    if body.budget:
+        protein_rate = (body.budget / max(1.0, body.days * body.floor_protein)
+                        * 0.75)
+
     sittings = weekplan.sittings_for(body.meals_per_day)
     # How many dishes a sitting needs is not simply the number of days. Most
     # savoury dishes suit lunch *and* dinner, so one pool has to cover both:
@@ -882,6 +986,7 @@ def autoplan(
                 10.0, body.floor_protein / max(1, body.meals_per_day) * 1.15),
             diet=body.diet or "any", cuisine=body.cuisine or "any",
             meals_wanted=[sitting],
+            prices=prices, cost_ceiling=protein_rate,
             # Without the fibre floor the builder optimises for calories and
             # protein alone, and every composed day then lands on target for
             # both and short on fibre -- which is exactly the miss the planner
@@ -907,9 +1012,76 @@ def autoplan(
 
     goals = {"ceiling": body.ceiling, "floorP": body.floor_protein,
              "floorF": body.floor_fibre}
-    result = weekplan.plan_week(
-        library, goals, days=body.days, meals_per_day=body.meals_per_day,
-        max_repeats=body.max_repeats)
+    def run(lib: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return weekplan.plan_week(
+            lib, goals, days=body.days, meals_per_day=body.meals_per_day,
+            max_repeats=body.max_repeats, prices=prices, budget=body.budget)
+
+    result = run(library)
+
+    # A budget is useless if the library is already stocked with expensive
+    # dishes: the top-up above only fires when a sitting is short, so a library
+    # built without a budget stays expensive forever and the number the user
+    # typed does nothing. If the week comes in over, cook a cheap round and try
+    # again -- once, and only keep it if it is genuinely better.
+    over = (body.budget and result.get("eatenCost")
+            and result["eatenCost"] > body.budget)
+    if over and prices:
+        existing = {r.name for r in rows}
+        cheaper: List[Dict[str, Any]] = []
+        for sitting in sittings:
+            cheaper += recipes.build_plan(
+                seed=f"thrift:{user.id}:{plan_id}:{sitting}:{len(rows)}",
+                meals=4, servings=4,
+                kcal_per_serving=max(
+                    200.0, body.ceiling / max(1, body.meals_per_day) * 0.9),
+                protein_per_serving=max(
+                    10.0, body.floor_protein / max(1, body.meals_per_day) * 1.15),
+                diet=body.diet or "any", cuisine=body.cuisine or "any",
+                meals_wanted=[sitting], prices=prices,
+                cost_ceiling=protein_rate or 0.1,
+                targets={"kcal": max(200.0, body.ceiling
+                                     / max(1, body.meals_per_day) * 0.9),
+                         "protein": max(10.0, body.floor_protein
+                                        / max(1, body.meals_per_day) * 1.15),
+                         "fibreMin": max(2.0, body.floor_fibre
+                                         / max(1, body.meals_per_day) * 1.15)})
+        # Try the plan before committing anything. A rejected attempt used to
+        # leave its dishes in the library anyway, so the *next* plan picked
+        # them up and came out worse -- a failed experiment quietly poisoning
+        # the thing it was testing.
+        fresh = [item for item in cheaper
+                 if str(item.get("name") or "").strip()
+                 and item["name"] not in existing]
+        if fresh:
+            trial = library + [
+                {**item, "id": f"trial-{n}"} for n, item in enumerate(fresh)]
+            second = run(trial)
+            # Better means cheaper without giving up days on target.
+            if (second.get("eatenCost") is not None
+                    and second["eatenCost"] < result["eatenCost"]
+                    and second["daysMeetingTargets"]
+                    >= result["daysMeetingTargets"]):
+                kept = {}
+                for item in fresh:
+                    row = Recipe(user_id=user.id, name=item["name"][:300],
+                                 data={k: v for k, v in item.items()
+                                       if k != "name"})
+                    session.add(row)
+                    rows.append(row)
+                    kept[f"trial-{len(kept)}"] = row
+                session.commit()
+                # The trial referred to dishes by placeholder id; the plan has
+                # to point at the rows that were actually saved.
+                real = {f"trial-{n}": row.id
+                        for n, row in enumerate(list(kept.values()))}
+                for day in second["days"]:
+                    for meal in day["meals"]:
+                        if meal["recipeId"] in real:
+                            meal["recipeId"] = real[meal["recipeId"]]
+                result = second
+                result["cheaperRoundAdded"] = len(fresh)
+                library = [_recipe_json(r) for r in rows]
 
     if body.apply and result["days"]:
         names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",

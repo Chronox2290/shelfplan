@@ -32,6 +32,90 @@ def _shortfall(total: Dict[str, float], goals: Dict[str, float]) -> Dict[str, fl
     }
 
 
+def _packs_for(grams: float, pack_g: Optional[float]) -> float:
+    """How many packs a quantity needs. Half a pack is still a whole pack."""
+    if not pack_g or pack_g <= 0:
+        return 1.0
+    return max(1.0, float(int(grams / pack_g)) + (1.0 if grams % pack_g else 0.0))
+
+
+def marginal_cost(recipe: Dict[str, Any], basket: Dict[str, float],
+                  prices: Dict[str, Dict[str, Any]]) -> float:
+    """What adding this dish actually costs, given what is already being bought.
+
+    Not the price of its ingredients -- the price of the *extra packs* it
+    forces. A second chicken dish that stays inside the kilo already on the
+    list is free; a dish with one unfamiliar ingredient costs a whole jar of it.
+
+    This is the difference between a hundred-dollar week and a five-hundred
+    dollar one, and it is invisible to any scoring that looks at a recipe on
+    its own.
+    """
+    if not prices:
+        return 0.0
+    total = 0.0
+    for part in recipe.get("ingredients", []):
+        food = part.get("food")
+        price = prices.get(food)
+        if not price or not price.get("price"):
+            continue
+        grams = float(part.get("gramsPerServing") or 0)
+        if grams <= 0:
+            continue
+        pack_g = price.get("pack") or part.get("pack")
+        had = basket.get(food, 0.0)
+        before = _packs_for(had, pack_g) if had else 0.0
+        after = _packs_for(had + grams, pack_g)
+        total += (after - before) * float(price["price"])
+    return round(total, 2)
+
+
+def add_to_basket(recipe: Dict[str, Any], basket: Dict[str, float]) -> None:
+    for part in recipe.get("ingredients", []):
+        food = part.get("food")
+        grams = float(part.get("gramsPerServing") or 0)
+        if food and grams > 0:
+            basket[food] = basket.get(food, 0.0) + grams
+
+
+def basket_cost(basket: Dict[str, float],
+                prices: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """What the list comes to, and how much of it the week actually eats.
+
+    These are different numbers and conflating them is misleading in both
+    directions. You pay for whole packs, so the till total is what leaves your
+    account this week -- but a $38 tub of whey that lasts two months is not a
+    weekly food cost, and a plan judged on the till total alone looks far more
+    expensive than the eating actually is.
+    """
+    till = 0.0
+    eaten = 0.0
+    leftovers: List[Dict[str, Any]] = []
+    for food, grams in sorted(basket.items()):
+        price = prices.get(food)
+        if not price or not price.get("price"):
+            continue
+        pack_g = price.get("pack")
+        packs = _packs_for(grams, pack_g)
+        spend = packs * float(price["price"])
+        till += spend
+        share = min(1.0, grams / (packs * pack_g)) if pack_g else 1.0
+        eaten += spend * share
+        if pack_g and share < 0.5 and spend >= 3.0:
+            leftovers.append({
+                "food": food,
+                "spend": round(spend, 2),
+                "usedPercent": round(share * 100),
+            })
+    leftovers.sort(key=lambda x: -x["spend"])
+    return {
+        "till": round(till, 2),
+        "eaten": round(eaten, 2),
+        "leftOver": round(till - eaten, 2),
+        "mostlyLeftOver": leftovers[:5],
+    }
+
+
 def _fit_score(candidate: Dict[str, float], gap: Dict[str, float]) -> float:
     """How well one meal closes what the day still needs.
 
@@ -95,6 +179,8 @@ def plan_week(
     max_repeats: int = 3,
     allow_seconds: bool = True,
     by_meal: bool = True,
+    prices: Optional[Dict[str, Dict[str, Any]]] = None,
+    budget: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Choose meals for each day so the day meets its targets.
 
@@ -119,6 +205,13 @@ def plan_week(
     used_count: Dict[int, int] = {}
     out_days: List[Dict[str, Any]] = []
     sittings = _sittings(meals_per_day) if by_meal else [None] * meals_per_day
+    basket: Dict[str, float] = {}
+    prices = prices or {}
+
+    # How hard to lean on the trolley. With a budget it is the whole point;
+    # without one, a gentle preference for reusing what is already being bought
+    # is still the right default, because that is what meal prep is.
+    thrift = 1.0 if budget else 0.35
 
     for _ in range(days):
         total = {"kcal": 0.0, "p": 0.0, "c": 0.0, "f": 0.0, "fb": 0.0}
@@ -129,7 +222,10 @@ def plan_week(
             slots_left = meals_per_day - slot
             # Leave room for the meals still to come, so the first two do not
             # eat the whole day's calories.
-            budget = gap["kcal"] / slots_left if slots_left else gap["kcal"]
+            # Named for what it is. This was called `budget`, which quietly
+            # overwrote the money budget passed in and made the planner report
+            # a calorie figure as dollars.
+            slot_kcal = gap["kcal"] / slots_left if slots_left else gap["kcal"]
 
             best = None
             best_score = 0.0
@@ -145,15 +241,26 @@ def plan_week(
                 if m["kcal"] > gap["kcal"]:
                     continue
                 score = _fit_score(m, gap)
-                # Prefer meals near the slot's budget; a tiny one wastes a slot.
-                if budget > 0:
-                    score *= 1.0 - min(0.6, abs(m["kcal"] - budget) / (budget * 3))
-                # Something already eaten this week is worth less than
-                # something new. Without this the greedy pick is deterministic
-                # and every day comes out identical, which is a menu nobody
-                # would accept even when the numbers are right.
+                # Prefer meals near the slot's share; a tiny one wastes a slot.
+                if slot_kcal > 0:
+                    score *= 1.0 - min(
+                        0.6, abs(m["kcal"] - slot_kcal) / (slot_kcal * 3))
+                # Something already eaten this week is worth a little less
+                # than something new, or the greedy pick is deterministic and
+                # every day comes out identical. Only a little, though: this
+                # used to be the strongest term in the whole score, and
+                # chasing variety is what turned a week of meal prep into
+                # twenty separate shops.
                 seen = used_count.get(recipe["id"], 0)
-                score *= 1.0 / (1.0 + seen * 0.9)
+                score *= 1.0 / (1.0 + seen * 0.28)
+
+                # And what it costs to add, given what is already on the list.
+                # A dish that stays inside packs already being bought is close
+                # to free; one that needs a jar of its own is not.
+                if prices:
+                    extra = marginal_cost(recipe, basket, prices)
+                    score *= 1.0 / (1.0 + thrift * extra / 6.0)
+
                 if score > best_score:
                     best, best_score = recipe, score
 
@@ -166,6 +273,7 @@ def plan_week(
             for k in total:
                 total[k] += m[k]
             used_count[best["id"]] = used_count.get(best["id"], 0) + 1
+            add_to_basket(best, basket)
             chosen.append({"recipeId": best["id"], "servings": 1, "on": True,
                            "meal": sitting or "", "name": best.get("name", "")})
 
@@ -211,19 +319,43 @@ def plan_week(
         })
 
     good = sum(1 for d in out_days if d["allMet"])
+    money = basket_cost(basket, prices) if prices else None
     return {
         "days": out_days,
         "daysMeetingTargets": good,
-        "message": _summarise(out_days, goals),
+        "estimatedCost": money["till"] if money else None,
+        "eatenCost": money["eaten"] if money else None,
+        "leftOverCost": money["leftOver"] if money else None,
+        "mostlyLeftOver": money["mostlyLeftOver"] if money else [],
+        "budget": budget,
+        "distinctIngredients": len(basket),
+        "message": _summarise(out_days, goals, money, budget),
     }
 
 
-def _summarise(days: List[Dict[str, Any]], goals: Dict[str, float]) -> str:
+def _summarise(days: List[Dict[str, Any]], goals: Dict[str, float],
+               money: Optional[Dict[str, Any]] = None,
+               budget: Optional[float] = None) -> str:
     good = sum(1 for d in days if d["allMet"])
     if not days:
         return "Nothing could be planned."
+
+    note = ""
+    if money and money.get("till"):
+        till, eaten = money["till"], money["eaten"]
+        note = f" About ${till:.0f} at the till"
+        if till - eaten >= 10:
+            note += (f", though only ${eaten:.0f} of that is eaten this week --"
+                     f" the rest is pack you keep")
+        if budget:
+            note += (f". Inside the ${budget:.0f} budget."
+                     if eaten <= budget else
+                     f". Over the ${budget:.0f} budget on what is eaten.")
+        else:
+            note += "."
+
     if good == len(days):
-        return f"All {len(days)} days meet every target."
+        return f"All {len(days)} days meet every target.{note}"
 
     missing = []
     if any(not d["met"]["protein"] for d in days):
@@ -237,7 +369,8 @@ def _summarise(days: List[Dict[str, Any]], goals: Dict[str, float]) -> str:
 
     return (f"{good} of {len(days)} days meet every target. "
             f"Short on {', and '.join(missing)}. "
-            f"More high-protein or high-fibre recipes in the library would fix it.")
+            f"More high-protein or high-fibre recipes in the library would "
+            f"fix it.{note}")
 
 
 def rebalance(

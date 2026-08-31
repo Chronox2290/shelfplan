@@ -1427,3 +1427,84 @@ page's own wording is shown against any line that scaling has had to change.
 Search by name or by ingredient -- "what can I do with the mince in the fridge"
 is the question a library actually gets asked -- filter by meal and by kind,
 and sort by rating, name, times cooked, calories or protein.
+
+## A week that costs $500
+
+The planner chose meals on nutrition alone, and maximised variety while it was
+at it -- which is the most expensive thing it could possibly do. Every new dish
+brings new ingredients, and a shopping list is bought in whole packs. Twenty
+different dinners is twenty packs of meat.
+
+The plan this app was built to replace did the opposite. The same protein
+overnight oats every morning, the same beef chilli twice, about fifteen
+distinct ingredients across the week, and it cleared 150g of protein and 25g of
+fibre a day for under a hundred dollars. Meal prep is repetitive on purpose,
+and the repetition is most of what makes it affordable.
+
+Three things were missing:
+
+**The planner could not see the trolley.** It now costs a candidate by its
+*marginal* price -- the extra packs it forces, given what is already being
+bought. A second chicken dish that stays inside the kilo already on the list is
+nearly free; one unfamiliar ingredient costs a whole jar. This is invisible to
+any scoring that looks at a recipe on its own.
+
+**The builder could not see prices at all.** It can now, and what it weighs is
+not what a serving costs but **what its protein costs**. Penalising the plain
+price pushed it onto beans and grains -- cheap, and nowhere near 150g a day. A
+$4 serving carrying 55g of protein is better value than a $2 one carrying 20g,
+and that is the choice the old plan made over and over: whey, yoghurt, chicken
+breast, lean mince.
+
+**Variety was the strongest term in the score.** `max_repeats` now defaults to
+five rather than three, and repeating a dish costs much less than it did.
+
+On a fresh library, planning to a $110 budget now returns **all seven days on
+target -- 1827 kcal, 160g protein, 32g fibre -- for $162 at the till**.
+
+### Two numbers, not one
+
+You pay for whole packs, so the till total is what leaves your account. But a
+$38 tub of whey that lasts two months is not a weekly food cost, and a plan
+judged on the till total alone looks far more expensive than the eating is. The
+planner now reports both, and names what is mostly left over:
+
+```
+At the till        $161.57
+Eaten this week     $82.37
+Pack you keep       $79.20
+Mostly left over: whey protein $38.02 (22% used) · olive oil $19.00 (21% used)
+```
+
+### What a budget cannot fix
+
+The planner can only choose from the recipes you have saved. A library built
+before budgets existed stays expensive no matter what number you type, because
+the top-up only composes new dishes when a *sitting* is short, not when the
+week is dear. It now tries a cheaper round and re-plans -- keeping the result
+only if it is both cheaper and no worse on target -- and says plainly when the
+saved recipes are the reason it cannot get there.
+
+A rejected attempt no longer leaves its dishes behind, either. It used to save
+them anyway, so the next plan picked them up and came out worse: a failed
+experiment quietly poisoning the thing it was testing.
+
+## A day you can read
+
+The old plan put the whole day on the page -- the day's totals, then each meal
+named, its ingredients with their grams, and what that meal came to. You could
+see what Tuesday was by looking at Tuesday. Here you got a name and a calorie
+figure, and everything else was a click away.
+
+Each day now carries its full macro line, and each meal shows its own energy,
+protein and fibre with the ingredient list underneath at the servings planned.
+**Show ingredients** turns the detail off for a tighter view, and remembers.
+
+## Two bugs found on the way
+
+`budget` was already the name of a local variable in the planner -- the calorie
+allowance for one sitting -- so the money budget was overwritten on the first
+loop and reported back as a calorie figure in dollars.
+
+A planned meal whose recipe had been deleted rendered as nothing at all, so a
+day silently came up a meal short with no way to tell why. It now says so.
