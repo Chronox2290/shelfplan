@@ -147,6 +147,20 @@ ol.steps li,ul.steps li{margin:0 0 5px}
 .small{font-size:12.5px}
 button.tiny{padding:3px 9px;font-size:12.5px;min-height:0}
 .was{font-size:12px;color:var(--ink-3);text-decoration:line-through}
+/* a price that has moved ------------------------------------------------- */
+.tag.deal{background:var(--stop);color:#fff;border-color:transparent;
+  letter-spacing:.06em;font-weight:700}
+.deal-price{color:var(--stop);font-weight:700}
+.off{font-size:11.5px;font-weight:700;color:var(--stop);letter-spacing:.03em}
+tr:has(.tag.deal){background:var(--stop-soft)}
+
+/* one day at a time ------------------------------------------------------ */
+.day-nav{margin:14px 0 4px;align-items:center}
+.day-nav .day-name{font-family:Archivo,Helvetica,Arial,sans-serif;font-size:16px;
+  min-width:96px;text-align:center}
+.calendar.single{grid-template-columns:1fr}
+.calendar.single .day{max-width:640px;margin:0 auto;width:100%}
+
 .spend{margin:12px 0 0;padding:11px 13px;background:var(--sunk);border-radius:10px}
 .spend-row{display:flex;justify-content:space-between;gap:14px;padding:3px 0;
   font-size:14.5px}

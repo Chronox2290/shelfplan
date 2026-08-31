@@ -1508,3 +1508,63 @@ loop and reported back as a calorie figure in dollars.
 
 A planned meal whose recipe had been deleted rendered as nothing at all, so a
 day silently came up a meal short with no way to tell why. It now says so.
+
+## Forty-two bags of spinach
+
+The shopping list multiplied by the batch size *as well as* the servings eaten:
+
+```js
+line.grams += i.gramsPerServing * m.servings * r.servings;
+```
+
+`m.servings` is already how many servings that meal takes. Multiplying by the
+recipe's batch size on top bought four servings' worth of everything for every
+serving planned -- **four times the food**, which is where forty-two bags of
+spinach and the five-hundred-dollar week came from, and why the planner's own
+estimate ($143) disagreed so wildly with the list.
+
+The same week now builds a fifteen-item list totalling **$150**, and the two
+figures agree. The list also opens with prices already in it, seeded from the
+catalogue table the planner worked the budget out from, instead of $0.00 and a
+column of dashes.
+
+## Landing on the calorie target
+
+Days stopped wherever whole servings happened to stop -- routinely a hundred or
+more short of the ceiling, which across a week is most of a day's food never
+eaten. Servings now move in tenths, and each day is filled toward the ceiling
+without crossing it, preferring whichever meal still closes an open floor:
+
+```
+day 0   1857 kcal   168g protein   29g fibre    servings [1, 1.1, 1]
+day 1   1896 kcal   173g protein   35g fibre    servings [1, 1, 1.1]
+day 2   1896 kcal   173g protein   35g fibre
+...
+week average 1887 kcal/day, every day on target, $143 at the till
+```
+
+Tenths are not fussy: 1.3 servings of the chicken bowl is 260g of chicken,
+which is the same thing the plan this replaced did when it wrote grams instead
+of portions.
+
+## One day at a time
+
+Seven days side by side is a lot to take in and, on a phone, a lot to scroll
+past. **One day** shows a single day with arrows either side, opening on today,
+and remembers which view you left it in.
+
+## A special that looks like one
+
+"on special" as a word among other words is the easiest thing on a row to miss,
+and catching the prices that have moved is most of why anyone reads a price
+list. A discounted line now carries a red **SPECIAL** flag, a tinted row, the
+price in red with the old price struck through above it, and the percentage
+off.
+
+## The report is not the week
+
+Adding a meal by hand updated the day, but the planner's report above it went
+on describing the week it had planned -- so the totals appeared not to change.
+Any hand edit now retires the report, the same way clearing and undo already
+did. A meal added by hand also lands in whichever sitting the day is still
+missing rather than showing up unlabelled.

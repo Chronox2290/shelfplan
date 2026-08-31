@@ -775,6 +775,14 @@ const CAT_ORDER = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'vegetarian', 'oth
 const week = {
   picker: null,
   monday: null,
+  // Seven days side by side is a lot to take in, and on a phone it is a lot to
+  // scroll past. One day at a time, opening on today, is how you actually use
+  // a plan -- you cook from it one day at a time.
+  one: (() => {
+    try { return localStorage.getItem('shelfplan.weekOne') === '1'; }
+    catch (_) { return false; }
+  })(),
+  day: 0,
   // Whether each meal lists what goes in it. On by default: seeing the day is
   // the point of a plan, and a name on its own does not tell you what Tuesday
   // involves.
@@ -829,6 +837,21 @@ function recipeById(id) {
   return (state.recipes || []).find((r) => r.id === Number(id));
 }
 
+// A meal added by hand belongs to whichever sitting the day is still missing,
+// so it lands in the right place rather than showing up unlabelled.
+function sittingFor(dayIndex) {
+  const day = weekData()[dayIndex] || { meals: [] };
+  const taken = new Set((day.meals || []).map((m) => m.meal).filter(Boolean));
+  return ['breakfast', 'lunch', 'dinner'].find((s) => !taken.has(s)) || 'lunch';
+}
+
+
+// Monday is 0 here, as the week is stored.
+function todayIndex() {
+  return (new Date().getDay() + 6) % 7;
+}
+
+
 function dayTotals(day) {
   const out = { kcal: 0, p: 0, c: 0, f: 0, fb: 0, meals: 0 };
   (day.meals || []).forEach((m) => {
@@ -879,6 +902,7 @@ function viewWeek() {
   }
 
   if (!week.monday) week.monday = mondayOf(new Date());
+  if (week.day == null) week.day = todayIndex();
   const from = new Date(week.monday);
   const to = dayDate(6);
 
@@ -924,7 +948,9 @@ function viewWeek() {
             ? `<span class="sitting">${esc(m.meal)}</span>` : ''}${esc(r.name)}</span></label>
         <div class="meal-controls">
           <input type="number" class="mult" data-mult="${di}:${mi}"
-            value="${m.servings || 1}" min="1" max="9" title="Servings">
+            value="${m.servings || 1}" min="0.1" max="9" step="0.1"
+            title="Servings -- tenths are allowed, so a day can land on its
+calorie target instead of stopping short of it">
           <button class="ghost tiny" data-rm="${di}:${mi}" title="Remove">&times;</button>
         </div>
         <div class="meal-macros num">
@@ -959,7 +985,7 @@ function viewWeek() {
       ${summary}
       <button class="tiny add-day" data-pick="${di}">+ Add a meal</button>
     </div>`;
-  }).join('');
+  });
 
   return `<div class="card">
     <div class="row"><div style="flex:1">
@@ -995,6 +1021,17 @@ function viewWeek() {
     </div>
     <div id="autoHost">${auto.show ? autoPanel() : ''}</div>
 
+    <div class="row day-nav">
+      <div class="seg">
+        <button class="${week.one ? '' : 'on'}" data-view="all">Whole week</button>
+        <button class="${week.one ? 'on' : ''}" data-view="one">One day</button>
+      </div>
+      ${week.one ? `<div style="flex:1"></div>
+        <button class="ghost" id="dayPrev" title="Previous day">&larr;</button>
+        <b class="day-name">${esc(DAYS[week.day])}</b>
+        <button class="ghost" id="dayNext" title="Next day">&rarr;</button>` : ''}
+    </div>
+
     <div class="stats" style="margin-top:14px">
       <div class="stat"><div class="k">Days that work</div>
         <div class="v">${daysOk}<span class="muted" style="font-size:15px">/${daysPlanned || 0}</span></div></div>
@@ -1003,7 +1040,8 @@ function viewWeek() {
         <div class="v">${Math.round(weekKcal).toLocaleString()}</div></div>
     </div>
     <div id="weekOut"></div>
-    <div class="calendar">${cards}</div></div>`;
+    <div class="calendar${week.one ? ' single' : ''}">${
+      week.one ? cards[week.day] : cards.join('')}</div></div>`;
 }
 
 
@@ -1744,19 +1782,34 @@ function resultRows(items, opts) {
       : '';
     return `<tr>
       <td class="prod"><div class="prod-row">${thumb(p)}<div>
-        <b>${esc(p.name)}</b>${p.on_special ? ' <span class="tag ok">special</span>' : ''}
+        <b>${esc(p.name)}</b>${p.on_special ? ' <span class="tag deal">SPECIAL</span>' : ''}
         ${p.in_stock === false ? ' <span class="tag stop">out of stock</span>' : ''}${link}
         <div class="muted small">${esc(p.package_size || '')}${
           p.cup_string ? ' &middot; ' + esc(p.cup_string) : ''}</div></div></div></td>
       <td data-label="Store"><span class="tag">${esc(p.store)}</span></td>
       <td class="r num" data-label="Pack">${p.pack_g ? p.pack_g + ' g' : '&mdash;'}</td>
-      <td class="r num" data-label="Price">${money(p.pack_price)}</td>
+      <td class="r num" data-label="Price">${priceCell(p)}</td>
       <td class="r num" data-label="Per kg">${p.per_kg ? money(p.per_kg) : '&mdash;'}</td>
       <td class="r"><button class="tiny" data-add-prod="${esc(key)}"
         data-idx="${i}">Add to list</button></td>
     </tr>`;
   }).join('');
 }
+
+// A price that is down deserves to look down. "on special" as a word among
+// other words is the easiest thing on a row to miss, and the whole reason for
+// looking at a price list is to catch the ones that have moved.
+function priceCell(p) {
+  const now = money(p.pack_price);
+  if (!p.on_special && !p.was_price) return now;
+  const was = p.was_price && p.pack_price && p.was_price > p.pack_price
+    ? p.was_price : null;
+  const off = was ? Math.round((was - p.pack_price) / was * 100) : null;
+  return `<span class="deal-price">${now}</span>
+    ${was ? `<div class="was num">${money(was)}</div>` : ''}
+    ${off ? `<div class="off num">${off}% off</div>` : ''}`;
+}
+
 
 function resultTable(items, note) {
   if (!items.length) {
@@ -2015,7 +2068,10 @@ function openPicker(dayIndex) {
       const servings = Math.max(1, Number($('pickServ').value) || 1);
       weekData()[dayIndex].meals.push({
         recipeId: Number(b.dataset.choose), servings,
+        meal: sittingFor(dayIndex),
       });
+      // The planner's report describes the week it planned, not this one.
+      auto.result = null;
       close();
       await savePlan();
       render();
@@ -2034,6 +2090,7 @@ function wireWeek() {
     box.addEventListener('change', async () => {
       const [di, mi] = box.dataset.on.split(':').map(Number);
       weekData()[di].meals[mi].on = box.checked;
+      auto.result = null;
       await savePlan();
       render();
     });
@@ -2042,7 +2099,9 @@ function wireWeek() {
   document.querySelectorAll('[data-mult]').forEach((input) => {
     input.addEventListener('change', async () => {
       const [di, mi] = input.dataset.mult.split(':').map(Number);
-      weekData()[di].meals[mi].servings = Math.max(1, Number(input.value) || 1);
+      weekData()[di].meals[mi].servings =
+        Math.max(0.1, Math.round((Number(input.value) || 1) * 10) / 10);
+      auto.result = null;
       await savePlan();
       render();
     });
@@ -2066,6 +2125,7 @@ function wireWeek() {
     b.addEventListener('click', async () => {
       const [di, mi] = b.dataset.rm.split(':').map(Number);
       weekData()[di].meals.splice(mi, 1);
+      auto.result = null;
       await savePlan();
       render();
     });
@@ -2084,6 +2144,27 @@ function wireWeek() {
   const today = $('weekToday');
   if (today) today.addEventListener('click', () => {
     week.monday = mondayOf(new Date());
+    render();
+  });
+
+  document.querySelectorAll('[data-view]').forEach((b) => {
+    b.addEventListener('click', () => {
+      week.one = b.dataset.view === 'one';
+      if (week.one && week.day == null) week.day = todayIndex();
+      try {
+        localStorage.setItem('shelfplan.weekOne', week.one ? '1' : '0');
+      } catch (_) { /* a private window just forgets the preference */ }
+      render();
+    });
+  });
+  const backADay = $('dayPrev');
+  if (backADay) backADay.addEventListener('click', () => {
+    week.day = (week.day + 6) % 7;
+    render();
+  });
+  const onADay = $('dayNext');
+  if (onADay) onADay.addEventListener('click', () => {
+    week.day = (week.day + 1) % 7;
     render();
   });
 
@@ -2153,7 +2234,12 @@ function wireWeek() {
             aisle: i.aisle || 'pantry', woo: i.query || i.food,
             pack: i.pack || null, grams: 0, usedIn: [],
           });
-          line.grams += (i.gramsPerServing || 0) * (m.servings || 1) * (r.servings || 1);
+          // What you eat, not what you cook. `m.servings` is already how many
+          // servings that meal takes; multiplying by the batch size as well
+          // bought four servings' worth of everything for every serving
+          // planned -- four times the food, forty-two bags of spinach, and a
+          // five hundred dollar week.
+          line.grams += (i.gramsPerServing || 0) * (m.servings || 1);
           if (!line.usedIn.includes(r.name)) line.usedIn.push(r.name);
         });
       }));
@@ -2175,11 +2261,38 @@ function wireWeek() {
       });
       state.plan.data.shop = totals;
       state.plan.data.got = [];
+
+      // Seed the prices the planner already worked the budget out from, so the
+      // list opens with a total instead of $0.00 and a row of dashes. These
+      // come from the catalogue, not from a fresh trip to the store, so it
+      // costs nothing and Refresh prices still gets today's figures.
+      let seeded = 0;
+      try {
+        const table = (await api('/ingredient-prices')).prices || {};
+        const prices = state.plan.data.prices || {};
+        const today = new Date().toISOString().slice(0, 10);
+        Object.keys(totals).forEach((food) => {
+          const known = table[food];
+          if (!known || !known.price) return;
+          const history = prices[food] || [];
+          if (history.some((e) => e.date === today)) return;
+          history.push({
+            price: known.price, pack: known.pack, date: today,
+            store: 'Woolworths (online)', source: 'catalogue',
+            matched: known.product || '',
+          });
+          prices[food] = history;
+          seeded += 1;
+        });
+        state.plan.data.prices = prices;
+      } catch (_) { /* the list is still usable without them */ }
+
       await savePlan();
       $('weekOut').innerHTML = `<div class="note">Shopping list built:
         ${Object.keys(totals).length} items${pantry.size
-          ? `, skipping ${pantry.size} already in your pantry` : ''}. Open the
-        <b>Shopping list</b> tab to price and tick them off.</div>`;
+          ? `, skipping ${pantry.size} already in your pantry` : ''}${seeded
+          ? `, ${seeded} priced from the catalogue` : ''}. Open the
+        <b>Shopping list</b> tab to check them off.</div>`;
     });
   }
 }

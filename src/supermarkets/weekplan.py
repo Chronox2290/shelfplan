@@ -32,6 +32,11 @@ def _shortfall(total: Dict[str, float], goals: Dict[str, float]) -> Dict[str, fl
     }
 
 
+# How close to the ceiling is close enough. A day that stops further short
+# than this is a day that has not fed you what you planned for.
+CALORIE_TOLERANCE = 60.0
+
+
 def _packs_for(grams: float, pack_g: Optional[float]) -> float:
     """How many packs a quantity needs. Half a pack is still a whole pack."""
     if not pack_g or pack_g <= 0:
@@ -70,10 +75,11 @@ def marginal_cost(recipe: Dict[str, Any], basket: Dict[str, float],
     return round(total, 2)
 
 
-def add_to_basket(recipe: Dict[str, Any], basket: Dict[str, float]) -> None:
+def add_to_basket(recipe: Dict[str, Any], basket: Dict[str, float],
+                  servings: float = 1.0) -> None:
     for part in recipe.get("ingredients", []):
         food = part.get("food")
-        grams = float(part.get("gramsPerServing") or 0)
+        grams = float(part.get("gramsPerServing") or 0) * servings
         if food and grams > 0:
             basket[food] = basket.get(food, 0.0) + grams
 
@@ -207,6 +213,7 @@ def plan_week(
     sittings = _sittings(meals_per_day) if by_meal else [None] * meals_per_day
     basket: Dict[str, float] = {}
     prices = prices or {}
+    by_id = {r["id"]: r for r in usable}
 
     # How hard to lean on the trolley. With a budget it is the whole point;
     # without one, a gentle preference for reusing what is already being bought
@@ -273,7 +280,6 @@ def plan_week(
             for k in total:
                 total[k] += m[k]
             used_count[best["id"]] = used_count.get(best["id"], 0) + 1
-            add_to_basket(best, basket)
             chosen.append({"recipeId": best["id"], "servings": 1, "on": True,
                            "meal": sitting or "", "name": best.get("name", "")})
 
@@ -304,6 +310,48 @@ def plan_week(
                 for k in total:
                     total[k] += m[k]
                 gap = _shortfall(total, goals)
+
+        # Fill the day up toward the ceiling without crossing it.
+        #
+        # Whole servings are too coarse to land on a number: another meal is
+        # six hundred calories, so a day packed in whole servings stops
+        # wherever it happens to stop -- routinely a hundred or more short,
+        # which across a week is most of a day's food never eaten. Servings
+        # move in tenths here for the same reason the plan this replaced gave
+        # grams rather than portions: 1.3 servings of the chicken bowl is 260g
+        # of chicken, which is an ordinary thing to put in a box.
+        for _ in range(60):
+            head = goals["ceiling"] - total["kcal"]
+            if head <= CALORIE_TOLERANCE or not chosen:
+                break
+            gap = _shortfall(total, goals)
+            best_line = None
+            best_gain = 0.0
+            for line in chosen:
+                recipe = by_id.get(line["recipeId"])
+                if recipe is None:
+                    continue
+                step = _macros(recipe, 0.1)
+                if step["kcal"] <= 0 or step["kcal"] > head:
+                    continue
+                # Prefer whichever meal closes a floor that is still open;
+                # once both are met, whichever fills the calories best.
+                gain = (min(step["p"], max(0.0, gap["p"])) * 2.0
+                        + min(step["fb"], max(0.0, gap["fb"])) * 1.4
+                        + step["kcal"] / 100.0)
+                if gain > best_gain:
+                    best_line, best_gain = line, gain
+            if best_line is None:
+                break
+            best_line["servings"] = round(best_line["servings"] + 0.1, 2)
+            for key, value in _macros(by_id[best_line["recipeId"]], 0.1).items():
+                total[key] += value
+
+        # The servings are final now, so this is what the shopping needs.
+        for line in chosen:
+            recipe = by_id.get(line["recipeId"])
+            if recipe is not None:
+                add_to_basket(recipe, basket, line["servings"])
 
         met = {
             "kcal": total["kcal"] <= goals["ceiling"],
