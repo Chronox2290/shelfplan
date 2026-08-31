@@ -151,6 +151,28 @@ def score(product: Dict[str, Any], wanted: str, target_g: Optional[float]) -> fl
     return s
 
 
+def rank_key(
+    product: Dict[str, Any], wanted: str, target_g: Optional[float]
+) -> tuple:
+    """Identity first; where identity genuinely ties, the better buy wins.
+
+    "Polenta" describes "La Gina Polenta Corn Meal 500g" and "Marco Polo
+    Polenta 750g" exactly as well -- both are polenta, and everything else in
+    either name is brand and packaging. Nothing in the words can separate them,
+    so the order the store happened to list them in was deciding, which is how
+    a search for polenta settles on the dearer corn meal.
+
+    This is a price tool. When two candidates are equally the right thing, the
+    cheaper kilo is the answer. Scores are compared rounded, because a
+    hundredth of a point is noise rather than a real preference, and a
+    candidate with no weight basis sorts last so it can never win on a price
+    per kilo it does not have.
+    """
+    per_kg = product.get("per_kg")
+    value = -per_kg if per_kg else float("-inf")
+    return (round(score(product, wanted, target_g), 2), value)
+
+
 _SEARCHERS = {
     "woolworths": lambda q, limit: catalog.search(q, limit=limit),
     "coles": lambda q, limit: coles_catalog.search(q, limit=limit),
@@ -216,7 +238,7 @@ def resolve_from_products(
     wanted = f"{query} {food}"
     ranked = sorted(
         found["products"],
-        key=lambda p: score(p, wanted, target_pack_g),
+        key=lambda p: rank_key(p, wanted, target_pack_g),
         reverse=True,
     )
     best = ranked[0]

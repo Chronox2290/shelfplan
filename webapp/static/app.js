@@ -2069,7 +2069,20 @@ function wireFindRecipe() {
 
 /* ---------------------------------------------------------------- scanner */
 
-const scan = { stream: null, running: false, detector: null, last: '', result: null };
+const scan = {
+  stream: null, track: null, running: false, detector: null,
+  last: '', lastAt: 0, streak: { code: '', n: 0 },
+  result: null, auto: true, added: [], busy: false, torch: false,
+};
+
+// Two readings of the same number before it counts. At this frame rate that is
+// under a fifth of a second -- fast enough to feel instant, strict enough that
+// a barcode caught edge-on does not add the wrong tin.
+const SCAN_INTERVAL_MS = 90;
+const SCAN_AGREE = 2;
+// Reading the same code again is normally the camera not having moved yet.
+// After a few seconds it means a second one of the same thing.
+const SCAN_REPEAT_MS = 3000;
 
 // Chrome on Android ships a barcode detector, so no library is needed and
 // nothing extra is downloaded. Everywhere else falls back to typing the number.
@@ -2090,14 +2103,37 @@ function scannerSheet() {
         <div><h3 style="margin:0">Point at a barcode</h3>
           <p class="muted small" id="scanHint" style="margin:2px 0 0">
             Starting the camera&hellip;</p></div>
-        <button class="ghost" id="scanClose">Close</button>
+        <button class="ghost" id="scanClose">Done</button>
       </div>
       <div class="scan-view">
-        <video id="scanVideo" playsinline muted></video>
+        <video id="scanVideo" playsinline muted autoplay></video>
         <div class="scan-frame"></div>
+        <div class="scan-flash" id="scanFlash"></div>
       </div>
-      <div id="scanOut" style="margin-top:12px"></div>
+      <div class="scan-tools">
+        <label class="scan-toggle"><input type="checkbox" id="scanAuto" checked>
+          <span>Add as I scan</span></label>
+        <div style="flex:1"></div>
+        <button class="ghost tiny" id="scanTorch" hidden>Light</button>
+      </div>
+      <div id="scanOut"></div>
+      <div id="scanList" class="scan-list"></div>
     </div>`;
+}
+
+function scanHint(text) {
+  const el = $('scanHint');
+  if (el) el.textContent = text;
+}
+
+function scanFlash() {
+  const el = $('scanFlash');
+  if (!el) return;
+  el.classList.remove('lit');
+  // Restart the animation rather than let a second scan land on a class that
+  // is already applied and therefore does nothing.
+  void el.offsetWidth;
+  el.classList.add('lit');
 }
 
 async function openScanner() {
@@ -2106,22 +2142,74 @@ async function openScanner() {
   host.innerHTML = scannerSheet();
   document.body.appendChild(host);
 
-  const close = () => { stopScanner(); host.remove(); };
+  scan.auto = true;
+  scan.added = [];
+  scan.last = '';
+  scan.lastAt = 0;
+  scan.streak = { code: '', n: 0 };
+  scan.result = null;
+  scan.torch = false;
+
+  const close = () => {
+    stopScanner();
+    host.remove();
+    // The list behind the sheet is stale by however much was scanned into it.
+    if (scan.added.length) render();
+  };
   $('scanBack').addEventListener('click', close);
   $('scanClose').addEventListener('click', close);
+  $('scanAuto').addEventListener('change', (e) => {
+    scan.auto = e.target.checked;
+    scanHint(scan.auto
+      ? 'Hold a barcode in the frame — it adds itself.'
+      : 'Hold a barcode in the frame.');
+  });
 
   const video = $('scanVideo');
   try {
     scan.stream = await navigator.mediaDevices.getUserMedia({
-      // The rear camera is the one pointing at the tin.
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
+      // The rear camera is the one pointing at the tin. Ask for a full HD
+      // frame: a barcode is thin black lines, and at 640px wide the lines of
+      // a supermarket EAN merge into grey unless the phone is held close and
+      // still -- which is exactly the fiddliness worth removing.
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 }, height: { ideal: 1080 },
+      },
       audio: false,
     });
     video.srcObject = scan.stream;
     await video.play();
-    $('scanHint').textContent = 'Hold the barcode inside the frame.';
+    scan.track = scan.stream.getVideoTracks()[0] || null;
+
+    if (scan.track) {
+      // A barcode at arm length is a close subject. Left alone the camera
+      // hunts for focus and only settles once nothing is moving -- the other
+      // half of having to hold still. These are best-effort hints; a camera
+      // that does not offer them simply ignores them.
+      try {
+        await scan.track.applyConstraints({
+          advanced: [{ focusMode: 'continuous' }, { exposureMode: 'continuous' }],
+        });
+      } catch (_) { /* the camera decides for itself, which is fine */ }
+
+      const caps = scan.track.getCapabilities
+        ? (scan.track.getCapabilities() || {}) : {};
+      if (caps.torch) {
+        const torch = $('scanTorch');
+        torch.hidden = false;
+        torch.addEventListener('click', async () => {
+          scan.torch = !scan.torch;
+          try {
+            await scan.track.applyConstraints({ advanced: [{ torch: scan.torch }] });
+          } catch (_) { scan.torch = false; }
+          torch.classList.toggle('primary', scan.torch);
+        });
+      }
+    }
+    scanHint('Hold a barcode in the frame — it adds itself.');
   } catch (err) {
-    $('scanHint').textContent = 'Camera unavailable.';
+    scanHint('Camera unavailable.');
     $('scanOut').innerHTML = `<div class="err">${esc(
       err && err.name === 'NotAllowedError'
         ? 'Camera permission was declined. Allow it for this site, or type the number in instead.'
@@ -2131,9 +2219,14 @@ async function openScanner() {
     return;
   }
 
-  scan.detector = new window.BarcodeDetector({
-    formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'],
-  });
+  let formats = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'itf'];
+  try {
+    const available = await window.BarcodeDetector.getSupportedFormats();
+    const usable = formats.filter((f) => available.includes(f));
+    if (usable.length) formats = usable;
+  } catch (_) { /* take the list as written */ }
+  scan.detector = new window.BarcodeDetector({ formats });
+
   scan.running = true;
   tickScanner(video);
 }
@@ -2141,25 +2234,45 @@ async function openScanner() {
 async function tickScanner(video) {
   if (!scan.running) return;
   try {
-    const codes = await scan.detector.detect(video);
-    const hit = codes.find((c) => (c.rawValue || '').length >= 6);
-    if (hit && hit.rawValue !== scan.last) {
-      scan.last = hit.rawValue;
-      if (navigator.vibrate) navigator.vibrate(40);
-      await handleScan(hit.rawValue);
+    // Skip frames while a lookup is in flight: decoding underneath it only
+    // competes for the same phone and cannot act on what it finds.
+    if (!scan.busy && video.readyState >= 2) {
+      const codes = await scan.detector.detect(video);
+      const hit = codes.find((c) => (c.rawValue || '').length >= 6);
+      if (hit) acceptScan(hit.rawValue);
     }
   } catch (_) { /* a frame that will not decode is normal */ }
-  // requestAnimationFrame would run far faster than any barcode needs and
-  // flattens the phone's battery for nothing.
-  if (scan.running) setTimeout(() => tickScanner(video), 250);
+  if (scan.running) setTimeout(() => tickScanner(video), SCAN_INTERVAL_MS);
+}
+
+function acceptScan(code) {
+  if (scan.streak.code === code) scan.streak.n += 1;
+  else scan.streak = { code, n: 1 };
+  if (scan.streak.n < SCAN_AGREE) return;
+
+  const now = Date.now();
+  if (code === scan.last && now - scan.lastAt < SCAN_REPEAT_MS) {
+    scan.lastAt = now;
+    return;
+  }
+  scan.last = code;
+  scan.lastAt = now;
+  if (navigator.vibrate) navigator.vibrate(35);
+  scanFlash();
+  handleScan(code);
 }
 
 function stopScanner() {
   scan.running = false;
+  if (scan.track && scan.torch) {
+    try { scan.track.applyConstraints({ advanced: [{ torch: false }] }); }
+    catch (_) { /* the track is about to stop anyway */ }
+  }
   if (scan.stream) {
     scan.stream.getTracks().forEach((t) => t.stop());
     scan.stream = null;
   }
+  scan.track = null;
 }
 
 function manualEntryHtml() {
@@ -2181,18 +2294,101 @@ function wireManualEntry() {
 
 async function handleScan(code) {
   const out = $('scanOut');
-  out.innerHTML = '<div class="note">Looking that up&hellip;</div>';
+  scan.busy = true;
+  scanHint('Looking that up…');
   try {
     const res = await api('/barcode/' + encodeURIComponent(code));
     scan.result = res;
-    out.innerHTML = renderScan(res);
-    wireScanResult();
+    if (scan.auto && res.status === 'success') {
+      // The point of scanning a trolley is not stopping between tins.
+      out.innerHTML = '';
+      await addScanned(res);
+      scanHint('Added. Point at the next one.');
+    } else {
+      out.innerHTML = renderScan(res);
+      wireScanResult();
+      scanHint(res.status === 'success'
+        ? 'Tap add, or point at the next one.'
+        : 'Nothing found for that code.');
+    }
   } catch (err) {
     out.innerHTML = `<div class="err">${esc(err.message)}</div>${manualEntryHtml()}`;
     wireManualEntry();
     // Let the same code be tried again after a failure.
     scan.last = '';
+  } finally {
+    scan.busy = false;
   }
+}
+
+function scannedBody(res) {
+  const p = res.product;
+  const n = res.nutrition;
+  const name = (p && p.name) || (n && n.name) || 'Scanned item';
+  return p && p.stockcode
+    ? { store: p.store || 'woolworths', stockcode: String(p.stockcode),
+        aisle: guessAisle(p.name) }
+    : { food: name, aisle: guessAisle(name), pack: (n && n.pack_g) || null };
+}
+
+async function addScanned(res) {
+  const p = res.product;
+  const n = res.nutrition;
+  const name = (p && p.name) || (n && n.name) || 'Scanned item';
+  const saved = await api('/plans/' + state.planId + '/shop-items',
+    { method: 'POST', body: scannedBody(res) });
+  await loadPlan();
+
+  // Show the price the server settled on, which for anything Woolworths does
+  // not stock is a lookup it did on the way in rather than the scan's figure.
+  const food = (saved && saved.food) || name;
+  const prices = (state.plan && state.plan.data && state.plan.data.prices) || {};
+  const history = prices[food];
+  const priced = history && history.length ? history[history.length - 1] : null;
+
+  scan.added.unshift({
+    food,
+    name,
+    price: priced && priced.price != null
+      ? priced.price : ((p && p.pack_price) || null),
+    image: (p && p.image) || (n && n.image) || '',
+  });
+  renderScanList();
+}
+
+function renderScanList() {
+  const list = $('scanList');
+  if (!list) return;
+  if (!scan.added.length) { list.innerHTML = ''; return; }
+  list.innerHTML = `<h4 class="pick-head">Added this trip (${scan.added.length})</h4>
+    ${scan.added.map((item) => `<div class="scan-row">
+      ${thumb({ image: item.image, name: item.name })}
+      <div style="flex:1;min-width:0">
+        <div class="clip">${esc(item.name)}</div>
+        <div class="muted small num">${item.price != null
+          ? money(item.price) : 'priced on the list'}</div>
+      </div>
+      <button class="ghost tiny" data-unscan="${esc(item.food)}">remove</button>
+    </div>`).join('')}`;
+
+  list.querySelectorAll('[data-unscan]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const food = btn.dataset.unscan;
+      btn.disabled = true;
+      try {
+        await api('/plans/' + state.planId + '/shop-items/'
+          + encodeURIComponent(food), { method: 'DELETE' });
+        scan.added = scan.added.filter((i) => i.food !== food);
+        await loadPlan();
+        renderScanList();
+        // Scanning it again should work, not be swallowed as a repeat.
+        scan.last = '';
+      } catch (err) {
+        btn.disabled = false;
+        scanHint(err.message);
+      }
+    });
+  });
 }
 
 function renderScan(res) {
@@ -2239,47 +2435,27 @@ function renderScan(res) {
     ${nutrition}
     <div class="row" style="margin-top:12px">${where}<div style="flex:1"></div>
       <button class="tiny primary" id="scanAdd">Add to shopping list</button>
-      <button class="tiny" id="scanAgain">Scan another</button>
     </div>
   </div>`;
 }
 
 function wireScanResult() {
   const add = $('scanAdd');
-  if (add) {
-    add.addEventListener('click', async () => {
-      const res = scan.result;
-      const p = res.product;
-      const n = res.nutrition;
-      add.disabled = true;
-      add.textContent = 'Adding…';
-      try {
-        const body = p && p.stockcode
-          ? { store: p.store || 'woolworths', stockcode: String(p.stockcode),
-              aisle: guessAisle(p.name) }
-          : { food: (n && n.name) || 'Scanned item',
-              aisle: guessAisle((n && n.name) || ''),
-              pack: (n && n.pack_g) || null };
-        await api('/plans/' + state.planId + '/shop-items',
-          { method: 'POST', body });
-        await loadPlan();
-        add.textContent = 'On the list';
-      } catch (err) {
-        add.disabled = false;
-        add.textContent = 'Add to shopping list';
-        $('scanOut').insertAdjacentHTML('beforeend',
-          `<div class="err" style="margin-top:8px">${esc(err.message)}</div>`);
-      }
-    });
-  }
-  const again = $('scanAgain');
-  if (again) {
-    again.addEventListener('click', () => {
-      scan.last = '';
-      scan.result = null;
+  if (!add) return;
+  add.addEventListener('click', async () => {
+    add.disabled = true;
+    add.textContent = 'Adding…';
+    try {
+      await addScanned(scan.result);
       $('scanOut').innerHTML = '';
-    });
-  }
+      scanHint('Added. Point at the next one.');
+    } catch (err) {
+      add.disabled = false;
+      add.textContent = 'Add to shopping list';
+      $('scanOut').insertAdjacentHTML('beforeend',
+        `<div class="err" style="margin-top:8px">${esc(err.message)}</div>`);
+    }
+  });
 }
 
 /* -------------------------------------------------------- write your own */

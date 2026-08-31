@@ -330,6 +330,20 @@ input.mult{width:42px;padding:2px 5px;font-size:12.5px;text-align:center}
 .scan-view video{width:100%;height:100%;object-fit:cover;display:block}
 .scan-frame{position:absolute;inset:22% 12%;border:2px solid rgba(255,255,255,.9);
   border-radius:10px;box-shadow:0 0 0 100vmax rgba(0,0,0,.35)}
+/* A read is confirmed by the frame flashing, so a scan is visibly a scan even
+   where the phone has vibration switched off. */
+.scan-flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+.scan-flash.lit{animation:scanlit .28s ease-out}
+@keyframes scanlit{from{opacity:.75}to{opacity:0}}
+.scan-tools{display:flex;align-items:center;gap:10px;margin:10px 0 4px}
+.scan-toggle{display:inline-flex;align-items:center;gap:6px;margin:0;
+  font-size:13px;color:var(--ink-2);cursor:pointer}
+.scan-toggle input{margin:0}
+.scan-list{margin-top:6px;display:grid;gap:6px;overflow-y:auto;max-height:34vh}
+.scan-row{display:flex;align-items:center;gap:10px;padding:6px 8px;
+  background:var(--sunk);border-radius:9px}
+.clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (prefers-reduced-motion:reduce){.scan-flash.lit{animation:none}}
 
 /* picker sheet */
 .sheet-back{position:fixed;inset:0;background:rgba(19,23,20,.45);z-index:40}

@@ -1144,3 +1144,45 @@ not stock -- did not.
 Adding now prices the line straight away whichever route it came in by, and a
 line that genuinely has no price says "no price yet" with a **set** button,
 rather than showing a dash and leaving you to guess what to do.
+
+## Scanning a trolley, not a tin
+
+The scanner worked, but it asked too much: hold the phone still, wait, then tap
+to add. Three faults, all fixable:
+
+* **The camera was left to guess.** The stream asked for 1280 wide and nothing
+  else. A barcode is thin black lines, and at that width the bars of a
+  supermarket EAN blur into grey unless the phone is close and steady. It now
+  asks for full HD and, where the camera offers it, continuous focus and
+  exposure -- the other half of why it had to be held still.
+* **It looked ten times a second at most.** Detection ran on a 250ms timer.
+  It now runs every 90ms and skips frames only while a lookup is in flight.
+  A code counts once two readings agree, which at that rate is under a fifth
+  of a second: fast enough to feel instant, strict enough that a barcode caught
+  edge-on cannot add the wrong tin.
+* **Every item needed a tap.** With **Add as I scan** on -- the default -- a
+  scan goes straight onto the list and the camera keeps running, so a trolley
+  is scanned in one pass. Each item appears in a running list inside the sheet
+  with a **remove** beside it, and the same barcode read again within a few
+  seconds is the camera not having moved rather than a second jar. Turn the
+  toggle off to get the old confirm-each-one behaviour back.
+
+The frame flashes on a read, so a scan is visibly a scan on a phone with
+vibration switched off, and there is a **Light** button where the camera has a
+torch.
+
+## When two products are equally right
+
+"Polenta" describes *La Gina Polenta Corn Meal 500g* and *Marco Polo Polenta
+750g* exactly as well. Both are polenta; everything else in either name is
+brand and packaging, so no amount of reading the words separates them -- and
+the order the store happened to list them in was quietly deciding, which is how
+a search for polenta settled on the dearer corn meal.
+
+This is a price tool. Where two candidates are equally the right thing, the
+cheaper kilo now wins.
+
+```
+Polenta, dry           ->  Marco Polo Polenta 750g          $4.31/kg
+Extra virgin olive oil ->  Moro Primero Olive Oil 1L        $13.50
+```
