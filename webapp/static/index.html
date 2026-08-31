@@ -568,7 +568,18 @@ details summary{cursor:pointer}
   background: var(--sunk);
   border-top: 1px solid var(--rule);
 }
-.recipe-tags { display: flex; gap: 5px; flex-wrap: wrap; padding: 0 15px 11px; }
+/* Room above, or the tags butt straight into the header's rule and read as
+   though they have been sliced off. */
+.recipe-tags { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 15px; }
+.recipe-tags:empty { display: none; }
+.recipe-tags .tag { flex: none; max-width: 100%; }
+
+/* A grid stretches every cell to the tallest in its row, so a short recipe
+   next to a long one gained several hundred pixels of nothing. Cards keep
+   their own height; the column ends where the card ends. */
+.grid.g2 { align-items: start; }
+.recipe { display: flex; flex-direction: column; }
+.recipe > .recipe-body { flex: 1 1 auto; }
 /* =========================================================================
    A second pass on the look, and on the size of everything.
 

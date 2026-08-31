@@ -1728,3 +1728,30 @@ that quietly costs the day forty grams of protein.
 **swap** on a planned meal offers the library sorted by how close each dish is
 to the one being replaced, restricted to that sitting, and says what the
 difference would be: `+88 kcal +26g P +1g F`, or "much the same".
+
+## Imperial that looks imperial
+
+Switching systems moved the cups from 2 to 2 1/8 and stopped there, which is
+true and reads as nothing happening. The reason was that the *equivalent*
+alongside each line -- the "about 265 g" that is most of the useful information
+-- stayed in grams whichever system was chosen.
+
+It follows the system now, which is most of what the switch is for:
+
+```
+metric     2 cups white flour          about 265 g
+imperial   2 1/8 cups white flour      about 9 1/3 oz
+metric     2 cups buttermilk           about 500 ml
+imperial   2 1/8 cups buttermilk       about 1 US pint
+```
+
+## Cards that end where they end
+
+A CSS grid stretches every cell to the tallest in its row, so a short recipe
+sitting beside a long one gained several hundred pixels of nothing beneath its
+footer. Cards keep their own height now.
+
+The tags under the title had no room above them and butted straight into the
+header's rule, which is what made them look sliced off. And a card whose
+ingredients have no photographs no longer shows a band of three big lettered
+squares: they are not a picture of anything, and the card reads better without.

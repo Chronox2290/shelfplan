@@ -3659,6 +3659,9 @@ function recipeStrip(r) {
     if (wanted.length < 4 && !wanted.includes(i)) wanted.push(i);
   });
   if (!wanted.length) return '';
+  // Three big lettered squares are not a picture of anything. If the catalogue
+  // has no photograph for any of them, the card is better without the band.
+  if (!wanted.some((i) => photos.map[i.food] || i.image)) return '';
 
   return `<div class="recipe-strip">${wanted.map((i) => `
     <figure class="strip-cell">

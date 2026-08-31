@@ -283,12 +283,17 @@ def present(part: Dict[str, Any], system: str = "metric",
     return f"{scaled}{suffix} {item}".strip()
 
 
-def equivalent(part: Dict[str, Any], scale: float = 1.0) -> str:
+def equivalent(part: Dict[str, Any], scale: float = 1.0,
+               system: str = "metric") -> str:
     """What that line weighs or measures, where it is worth saying.
 
     Useful for a shopping list and for a cook with scales, and pointless
     alongside a line that already gives grams. Marked as an approximation
     because it is one -- these come from a density table, not from the recipe.
+
+    It follows the system asked for, which is most of what switching to
+    imperial is *for*: a cup is a cup in both, so if this stayed in grams the
+    switch looked like it did nothing at all.
     """
     unit = (part.get("unit") or "").lower()
     if unit not in _COOKS_UNITS:
@@ -300,12 +305,34 @@ def equivalent(part: Dict[str, Any], scale: float = 1.0) -> str:
     # knowing in millilitres. Weighing a liquid is nobody's idea of a help.
     liquid = any(word in item for word in _LIQUIDS)
     if liquid and millilitres and millilitres * scale >= 15:
-        return f"about {_round_nicely(millilitres * scale)} ml"
+        return "about " + _volume(millilitres * scale, system)
     if grams and grams * scale >= 10:
-        return f"about {_round_nicely(grams * scale)} g"
+        return "about " + _weight(grams * scale, system)
     if millilitres and millilitres * scale >= 15:
-        return f"about {_round_nicely(millilitres * scale)} ml"
+        return "about " + _volume(millilitres * scale, system)
     return ""
+
+
+def _weight(grams: float, system: str) -> str:
+    if system == "imperial":
+        if grams >= 453.6:
+            return f"{_round_spoons(grams / 453.6)} lb"
+        return f"{_round_spoons(grams / 28.35)} oz"
+    if grams >= 1000:
+        return f"{_round_nicely(grams / 1000)} kg"
+    return f"{_round_nicely(grams)} g"
+
+
+def _volume(millilitres: float, system: str) -> str:
+    if system == "imperial":
+        if millilitres >= 473:
+            pints = millilitres / 473.2
+            return (f"{_round_spoons(pints)} US "
+                    f"{'pint' if pints <= 1.0 else 'pints'}")
+        return f"{_round_spoons(millilitres / 29.57)} fl oz"
+    if millilitres >= 1000:
+        return f"{_round_nicely(millilitres / 1000)} L"
+    return f"{_round_nicely(millilitres)} ml"
 
 
 # How a measuring cup is actually marked, and how a recipe actually reads.
@@ -509,7 +536,7 @@ def scale_recipe(recipe: Dict[str, Any], servings: Optional[int] = None,
         # What each line weighs, where the line is in cups or spoons and the
         # answer is worth having. Kept separate from the line itself so the
         # page can show it quietly rather than in place of the measure.
-        "equivalents": [equivalent(part, factor)
+        "equivalents": [equivalent(part, factor, system)
                         for part in recipe.get("ingredients", [])],
         # What the page itself said, which is the authority when our own
         # conversion disagrees with it.
