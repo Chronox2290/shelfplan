@@ -1076,3 +1076,30 @@ says "try again in 58 minutes" rather than "3541 seconds".
 Counters live in the serving process, so `docker compose exec ... reset_all()`
 does nothing -- that starts a *separate* process. Restarting the container is
 what clears them.
+
+## When the stores block you
+
+Both supermarkets block on request volume, and the block lands on your
+**address** -- so it takes out everyone behind that connection, not just the
+process that earned it.
+
+* **Coles** answers with an Imperva JavaScript challenge (`_Incapsula_Resource`
+  in a short body). Passing it means executing their script to earn a clearance
+  cookie, which is bot-protection evasion rather than an integration, so this
+  reports the block instead of working around it.
+* **Woolworths** answers `403 Access Denied` from Akamai. This one does lift,
+  usually within a few hours.
+
+Requests are therefore paced deliberately: **2.5s minimum between Woolworths
+requests**, 1.8s for Coles, one at a time, with a circuit breaker that stops
+calling a store that is refusing and a shared cache so repeat lookups cost
+nothing. The background top-up runs at **one request every five minutes**.
+
+The seeding script defaults to **6 seconds between terms**. It was 1.2s, which
+is what earned a block during development -- a full run at that pace looks
+exactly like a crawler.
+
+**None of this stops the app working.** Find food reads the local catalogue, so
+searching, prices and the shopping list all keep working from what has already
+been indexed; only a live refresh fails, and it says so rather than showing
+blank cells.

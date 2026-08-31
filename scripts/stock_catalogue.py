@@ -65,8 +65,10 @@ def main() -> None:
                         help="Only this store. Default is both.")
     parser.add_argument("--terms", type=int, default=len(TERMS),
                         help="How many search terms to run.")
-    parser.add_argument("--delay", type=float, default=2.0,
-                        help="Seconds between requests. Lower is riskier.")
+    parser.add_argument("--delay", type=float, default=6.0,
+                        help="Seconds between requests. Both stores block on "
+                             "volume, and the block lands on your address, so "
+                             "slower is genuinely better here.")
     parser.add_argument("--limit", type=int, default=36,
                         help="Products per search. Woolworths caps this at 36.")
     parser.add_argument("--start", type=int, default=0,

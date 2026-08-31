@@ -187,7 +187,7 @@ function render() {
   }
   const views = { week: viewWeek, build: viewBuild, shop: viewShop,
                   prices: viewPrices, search: viewSearch, findrec: viewFind,
-                  recipes: viewRecipes, data: viewData };
+                  recipes: viewRecipes, own: viewOwn, data: viewData };
   host.innerHTML = (views[state.tab] || viewWeek)();
   if (state.tab === 'search') wireSearch();
   if (state.tab === 'shop') wireShop();
@@ -196,6 +196,7 @@ function render() {
   if (state.tab === 'week') wireWeek();
   if (state.tab === 'recipes') wireRecipes();
   if (state.tab === 'findrec') wireFindRecipe();
+  if (state.tab === 'own') wireOwn();
 }
 
 
@@ -549,7 +550,7 @@ function recipeCard(r, opts) {
   const notes = (r.notes || '').trim()
     ? `<p class="note small" style="margin-top:10px">${esc(r.notes)}</p>` : '';
 
-  const controls = o.library ? `<div class="row" style="margin-top:12px">
+  const controls = o.library ? `
       <div class="rating">${stars(r.id, r.rating)}</div>
       <div style="flex:1"></div>
       <span class="counter" title="How many times you have made this. Recipes cooked twice or more show under Favourites when planning a week.">
@@ -559,23 +560,32 @@ function recipeCard(r, opts) {
         <button class="ghost tiny" data-cooked="${r.id}" data-step="1"
           aria-label="One more">+</button>
       </span>
-      <button class="ghost tiny danger" data-del="${r.id}">Delete</button>
-    </div>` : '';
+      <button class="ghost tiny danger" data-del="${r.id}">Delete</button>` : '';
 
   const add = o.pickable
     ? `<button class="tiny" data-add="${r.id}">Add to a day</button>` : '';
 
   const cat = CAT_ORDER.includes(r.category) ? r.category : 'other';
-  return `<div class="day recipe">
-    <div class="row"><span class="dot cat-${esc(cat)}"
-      title="${esc(CAT_LABEL[cat])}"></span>
-      <h3 style="flex:1">${esc(r.name)}</h3>${add}</div>
-    ${r.cuisineLabel && r.cuisine !== 'any'
-      ? `<span class="tag">${esc(r.cuisineLabel)}</span>` : ''}
-    ${r.source ? `<a class="tag" href="${esc(r.source)}" target="_blank"
-      rel="noopener noreferrer">from ${esc(r.sourceName || 'the web')}</a>` : ''}
-    ${macroLine(r.perServing, r.servings)}
-    ${ing}${steps}${reheat}${notes}${controls}</div>`;
+  const tags = [
+    r.cuisineLabel && r.cuisine !== 'any'
+      ? `<span class="tag">${esc(r.cuisineLabel)}</span>` : '',
+    r.source ? `<a class="tag" href="${esc(r.source)}" target="_blank"
+      rel="noopener noreferrer">from ${esc(r.sourceName || 'the web')}</a>` : '',
+    `<span class="tag">${esc(CAT_LABEL[cat])}</span>`,
+  ].filter(Boolean).join(' ');
+
+  return `<div class="recipe">
+    <div class="recipe-head">
+      <span class="dot cat-${esc(cat)}" title="${esc(CAT_LABEL[cat])}"
+        style="margin-top:6px"></span>
+      <h3 style="flex:1;min-width:0">${esc(r.name)}</h3>${add}
+    </div>
+    <div class="recipe-tags">${tags}</div>
+    <div class="recipe-body">
+      ${macroLine(r.perServing, r.servings)}
+      <h4>Ingredients</h4>${ing}${steps}${reheat}${notes}
+    </div>
+    ${controls ? `<div class="recipe-foot">${controls}</div>` : ''}</div>`;
 }
 
 function viewRecipes() {
@@ -882,15 +892,15 @@ function viewShop() {
               packs > 1 ? ' &middot; ' + packs + ' packs' : ''}${
               p && p.matched ? ' &middot; ' + esc(p.matched) : ''}${link}</div>
             </div></div></td>
-          <td class="r num">${p && p.pack ? p.pack + ' g' : '&mdash;'}</td>
-          <td class="r num">${money(p && p.price)}
+          <td class="r num" data-label="Pack">${p && p.pack ? p.pack + ' g' : '&mdash;'}</td>
+          <td class="r num" data-label="Price">${money(p && p.price)}
             <button class="ghost tiny" data-edit="${esc(food)}" title="Correct this price">edit</button></td>
-          <td class="r num muted">${kg ? money(kg) + '/kg' : '&mdash;'}</td>
-          <td class="r muted small">${esc((p && p.store) || '')}
+          <td class="r num muted" data-label="Per kg">${kg ? money(kg) + '/kg' : '&mdash;'}</td>
+          <td class="r muted small" data-label="Store">${esc((p && p.store) || '')}
             <button class="ghost tiny" data-drop="${esc(food)}" title="Remove from list">&times;</button></td>
         </tr>`;
       }).join('');
-      return `<tr><td colspan="5" class="aisle">${esc(aisle)}</td></tr>` + rows;
+      return `<tr class="aisle-row"><td colspan="5" class="aisle">${esc(aisle)}</td></tr>` + rows;
     }).join('');
 
   return `<div class="card">
@@ -1360,12 +1370,12 @@ function resultRows(items, opts) {
         ${p.in_stock === false ? ' <span class="tag stop">out of stock</span>' : ''}${link}
         <div class="muted small">${esc(p.package_size || '')}${
           p.cup_string ? ' &middot; ' + esc(p.cup_string) : ''}</div></div></div></td>
-      <td><span class="tag">${esc(p.store)}</span></td>
-      <td class="r num">${p.pack_g ? p.pack_g + ' g' : '&mdash;'}</td>
-      <td class="r num">${money(p.pack_price)}</td>
-      <td class="r num">${p.per_kg ? money(p.per_kg) : '&mdash;'}</td>
+      <td data-label="Store"><span class="tag">${esc(p.store)}</span></td>
+      <td class="r num" data-label="Pack">${p.pack_g ? p.pack_g + ' g' : '&mdash;'}</td>
+      <td class="r num" data-label="Price">${money(p.pack_price)}</td>
+      <td class="r num" data-label="Per kg">${p.per_kg ? money(p.per_kg) : '&mdash;'}</td>
       <td class="r"><button class="tiny" data-add-prod="${esc(key)}"
-        data-idx="${i}">Add</button></td>
+        data-idx="${i}">Add to list</button></td>
     </tr>`;
   }).join('');
 }
@@ -2264,6 +2274,334 @@ function wireScanResult() {
       scan.last = '';
       scan.result = null;
       $('scanOut').innerHTML = '';
+    });
+  }
+}
+
+/* -------------------------------------------------------- write your own */
+
+const own = { name: '', servings: 4, items: [], steps: [''], busy: false };
+
+function ownMacros() {
+  const t = { kcal: 0, p: 0, c: 0, f: 0, fb: 0 };
+  own.items.forEach((i) => {
+    if (!i.per100 || !i.grams) return;
+    const factor = i.grams / 100;
+    ['kcal', 'p', 'c', 'f', 'fb'].forEach((k) => {
+      t[k] += (i.per100[k] || 0) * factor;
+    });
+  });
+  const per = Math.max(1, own.servings);
+  return {
+    total: t,
+    perServing: Object.fromEntries(
+      Object.entries(t).map(([k, v]) => [k, v / per])),
+  };
+}
+
+function ownCost() {
+  // Only counts lines with a known price, and says how many it could not.
+  let cost = 0;
+  let priced = 0;
+  own.items.forEach((i) => {
+    if (i.perKg && i.grams) { cost += i.perKg * (i.grams / 1000); priced += 1; }
+  });
+  return { cost, priced, missing: own.items.length - priced };
+}
+
+function viewOwn() {
+  const m = ownMacros();
+  const c = ownCost();
+  const per = m.perServing;
+
+  const rows = own.items.map((i, idx) => `<tr>
+    <td>${thumb({ image: i.image, name: i.food })
+      ? `<div class="prod-row">${thumb({ image: i.image, name: i.food })}
+         <div style="min-width:0"><b>${esc(i.food)}</b>
+         <div class="muted small">${esc(i.matched || 'no product matched')}</div></div></div>`
+      : esc(i.food)}</td>
+    <td class="r" data-label="Grams">
+      <input type="number" class="mult" style="width:74px" data-grams="${idx}"
+        value="${i.grams}" min="1" max="20000"> g</td>
+    <td class="r num" data-label="Energy">${i.per100
+      ? Math.round((i.per100.kcal || 0) * i.grams / 100) + ' kcal' : '&mdash;'}</td>
+    <td class="r num" data-label="Protein">${i.per100
+      ? Math.round((i.per100.p || 0) * i.grams / 100) + ' g' : '&mdash;'}</td>
+    <td class="r num" data-label="Cost">${i.perKg
+      ? money(i.perKg * i.grams / 1000) : '&mdash;'}</td>
+    <td class="r"><button class="ghost tiny" data-rmitem="${idx}"
+      title="Remove">&times;</button></td>
+  </tr>`).join('');
+
+  return `<div class="card">
+    <h2>Write your own recipe</h2>
+    <p class="sub">Search a product to add it. Nutrition and price come from
+      the catalogue, so the totals below are real rather than estimated.</p>
+
+    <div class="grid g2">
+      <div><label for="ownName">Name</label>
+        <input id="ownName" value="${esc(own.name)}" placeholder="e.g. Sunday chilli"></div>
+      <div><label for="ownServ">Makes how many servings</label>
+        <input id="ownServ" type="number" min="1" max="20" value="${own.servings}"></div>
+    </div>
+
+    <h4 style="margin:18px 0 6px">Ingredients</h4>
+    <div class="row">
+      <input id="ownSearch" placeholder="Search a product to add&hellip;"
+        style="flex:1;min-width:170px">
+      <button id="ownFind" class="primary">Search</button>
+      ${scannerSupported() ? '<button id="ownScan">Scan</button>' : ''}
+    </div>
+    <div id="ownResults" style="margin-top:10px"></div>
+
+    ${own.items.length ? `<div class="scroll" style="margin-top:12px"><table>
+      <thead><tr><th>Ingredient</th><th class="r">Amount</th>
+        <th class="r">Energy</th><th class="r">Protein</th>
+        <th class="r">Cost</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+
+      <div class="stats" style="margin-top:14px">
+        <div class="stat"><div class="k">Per serving</div>
+          <div class="v">${Math.round(per.kcal)}<span class="muted"
+            style="font-size:14px"> kcal</span></div></div>
+        <div class="stat"><div class="k">Protein each</div>
+          <div class="v">${Math.round(per.p)}<span class="muted"
+            style="font-size:14px"> g</span></div></div>
+        <div class="stat"><div class="k">Fibre each</div>
+          <div class="v">${Math.round(per.fb)}<span class="muted"
+            style="font-size:14px"> g</span></div></div>
+        <div class="stat"><div class="k">Cost each</div>
+          <div class="v">${c.priced ? money(c.cost / Math.max(1, own.servings)) : '—'}</div></div>
+      </div>
+      ${c.missing ? `<p class="muted small" style="margin:0">${c.missing}
+        ingredient${c.missing === 1 ? ' has' : 's have'} no price, so the cost is
+        a floor rather than a total.</p>` : ''}
+      <div class="macros num" style="margin-top:10px">
+        <span><b>${Math.round(per.c)}</b>g carb</span>
+        <span><b>${Math.round(per.f)}</b>g fat</span>
+        <span class="muted">per serving &middot; whole recipe
+          ${Math.round(m.total.kcal)} kcal</span></div>`
+      : '<p class="muted small" style="margin-top:10px">No ingredients yet.</p>'}
+
+    <h4 style="margin:20px 0 6px">Method</h4>
+    ${own.steps.map((st, i) => `<div class="row" style="margin-bottom:6px">
+      <span class="muted num small" style="width:20px">${i + 1}.</span>
+      <input data-step="${i}" value="${esc(st)}" placeholder="What happens at this step"
+        style="flex:1">
+      <button class="ghost tiny" data-rmstep="${i}" title="Remove">&times;</button>
+    </div>`).join('')}
+    <button id="ownAddStep" class="tiny">Add a step</button>
+
+    <div class="row" style="margin-top:18px">
+      <button id="ownSave" class="primary"${own.items.length ? '' : ' disabled'}>
+        Save to my library</button>
+      <button id="ownClear" class="ghost">Start again</button>
+    </div>
+    <div id="ownOut" style="margin-top:12px"></div>
+  </div>`;
+}
+
+async function ownSearch() {
+  const q = ($('ownSearch').value || '').trim();
+  if (!q) return;
+  const out = $('ownResults');
+  out.innerHTML = '<div class="note">Searching&hellip;</div>';
+  try {
+    // The catalogue first: instant, and it carries nutrition where a barcode
+    // scan has previously filled it in.
+    let res = await api('/catalogue?limit=8&q=' + encodeURIComponent(q));
+    let items = res.products || [];
+    if (!items.length) {
+      const live = await api('/search?limit=8&q=' + encodeURIComponent(q));
+      items = live.products || [];
+    }
+    if (!items.length) {
+      out.innerHTML = `<div class="note">Nothing found. You can still add it
+        by hand below.</div>${ownManualHtml(q)}`;
+      wireOwnManual();
+      return;
+    }
+    ownFound = items;
+    out.innerHTML = `<div class="scroll"><table><tbody>${items.map((p, i) => `
+      <tr><td><div class="prod-row">${thumb(p)}<div style="min-width:0">
+        <b>${esc(p.name)}</b>
+        <div class="muted small">${esc(p.package_size || '')}
+          ${p.per_kg ? '&middot; ' + money(p.per_kg) + '/kg' : ''}</div></div></div></td>
+      <td class="r"><button class="tiny" data-pick-ing="${i}">Add</button></td></tr>`
+    ).join('')}</tbody></table></div>${ownManualHtml(q)}`;
+    wireOwnPick();
+    wireOwnManual();
+  } catch (err) {
+    out.innerHTML = `<div class="err">${esc(err.message)}</div>`;
+  }
+}
+
+let ownFound = [];
+
+function ownManualHtml(q) {
+  return `<details style="margin-top:10px"><summary class="muted small">
+      Add "${esc(q)}" by hand instead</summary>
+    <div class="row" style="margin-top:8px">
+      <input id="ownManualName" value="${esc(q)}" placeholder="Name" style="flex:1">
+      <input id="ownManualKcal" type="number" placeholder="kcal/100g" style="width:110px">
+      <input id="ownManualP" type="number" placeholder="protein/100g" style="width:120px">
+      <button id="ownManualAdd" class="tiny">Add</button>
+    </div></details>`;
+}
+
+function wireOwnManual() {
+  const add = $('ownManualAdd');
+  if (!add) return;
+  add.addEventListener('click', async () => {
+    const name = ($('ownManualName').value || '').trim();
+    if (!name) return;
+    own.items.push({
+      food: name, grams: 100, image: '', matched: 'entered by hand',
+      per100: { kcal: Number($('ownManualKcal').value) || 0,
+                p: Number($('ownManualP').value) || 0, c: 0, f: 0, fb: 0 },
+      perKg: null, store: '', stockcode: '',
+    });
+    render();
+  });
+}
+
+function wireOwnPick() {
+  document.querySelectorAll('[data-pick-ing]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const p = ownFound[Number(b.dataset.pickIng)];
+      if (!p) return;
+      b.disabled = true;
+      b.textContent = 'Adding…';
+      // Nutrition is not in the store listing, so ask the barcode lookup,
+      // which reaches Open Food Facts for the panel.
+      let per100 = null;
+      if (p.barcode) {
+        try {
+          const scanRes = await api('/barcode/' + encodeURIComponent(p.barcode));
+          const n = scanRes.nutrition && scanRes.nutrition.nutrition;
+          if (n && n.kcal != null) per100 = n;
+        } catch (_) { /* no nutrition is survivable */ }
+      }
+      own.items.push({
+        food: p.name, grams: p.pack_g || 100, image: p.image || '',
+        matched: p.package_size || '', per100,
+        perKg: p.per_kg || null, store: p.store || '',
+        stockcode: String(p.stockcode || ''),
+      });
+      render();
+    });
+  });
+}
+
+function wireOwn() {
+  const name = $('ownName');
+  if (name) name.addEventListener('input', () => { own.name = name.value; });
+  const serv = $('ownServ');
+  if (serv) serv.addEventListener('change', () => {
+    own.servings = Math.max(1, Number(serv.value) || 1);
+    render();
+  });
+
+  const find = $('ownFind');
+  if (find) find.addEventListener('click', ownSearch);
+  const search = $('ownSearch');
+  if (search) search.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') ownSearch();
+  });
+  const scanBtn = $('ownScan');
+  if (scanBtn) scanBtn.addEventListener('click', openScanner);
+
+  document.querySelectorAll('[data-grams]').forEach((input) => {
+    input.addEventListener('change', () => {
+      own.items[Number(input.dataset.grams)].grams =
+        Math.max(1, Number(input.value) || 1);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-rmitem]').forEach((b) => {
+    b.addEventListener('click', () => {
+      own.items.splice(Number(b.dataset.rmitem), 1);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-step]').forEach((input) => {
+    input.addEventListener('input', () => {
+      own.steps[Number(input.dataset.step)] = input.value;
+    });
+  });
+  document.querySelectorAll('[data-rmstep]').forEach((b) => {
+    b.addEventListener('click', () => {
+      own.steps.splice(Number(b.dataset.rmstep), 1);
+      if (!own.steps.length) own.steps = [''];
+      render();
+    });
+  });
+  const addStep = $('ownAddStep');
+  if (addStep) addStep.addEventListener('click', () => {
+    own.steps.push('');
+    render();
+  });
+
+  const clear = $('ownClear');
+  if (clear) clear.addEventListener('click', () => {
+    if (!window.confirm('Discard this recipe?')) return;
+    own.name = ''; own.servings = 4; own.items = []; own.steps = [''];
+    render();
+  });
+
+  const save = $('ownSave');
+  if (save) {
+    save.addEventListener('click', async () => {
+      const title = (own.name || '').trim();
+      if (!title) {
+        $('ownOut').innerHTML = '<div class="err">Give it a name first.</div>';
+        return;
+      }
+      save.disabled = true;
+      save.textContent = 'Saving…';
+      const m = ownMacros();
+      try {
+        const res = await api('/recipes/save-many', {
+          method: 'POST',
+          body: {
+            recipes: [{
+              name: title,
+              servings: own.servings,
+              perServing: {
+                kcal: Math.round(m.perServing.kcal),
+                p: Math.round(m.perServing.p * 10) / 10,
+                c: Math.round(m.perServing.c * 10) / 10,
+                f: Math.round(m.perServing.f * 10) / 10,
+                fb: Math.round(m.perServing.fb * 10) / 10,
+              },
+              ingredients: own.items.map((i) => ({
+                food: i.food,
+                gramsPerServing: Math.round(i.grams / own.servings),
+                gramsTotal: i.grams,
+                query: i.food,
+                pack: null,
+                aisle: guessAisle(i.food),
+                role: 'other',
+              })),
+              steps: own.steps.filter((x) => x.trim()),
+              storage: '',
+              reheat: [],
+              ownRecipe: true,
+            }],
+          },
+        });
+        await loadRecipes();
+        $('ownOut').innerHTML = res.saved
+          ? `<div class="note">Saved. It is in <b>Recipes</b>, and can be put
+             on a day under <b>Week</b>.</div>`
+          : '<div class="warn">A recipe with that name is already saved.</div>';
+        save.textContent = 'Save to my library';
+        save.disabled = false;
+      } catch (err) {
+        $('ownOut').innerHTML = `<div class="err">${esc(err.message)}</div>`;
+        save.textContent = 'Save to my library';
+        save.disabled = false;
+      }
     });
   }
 }

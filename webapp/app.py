@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.supermarkets import (barcode as barcode_lib,  # noqa: E402
                               catalog, recipe_import, recipes,
-                              resolve, stores)
+                              resolve, stores, weekplan)
 
 from . import auth, mailer, passwords, pricing, security, trickle  # noqa: E402
 from .db import (Plan, PlanVersion, PriceRecord, Product,  # noqa: E402
@@ -160,6 +160,23 @@ class RescaleRequest(BaseModel):
     recipe: Dict[str, Any]
     servings: Optional[int] = Field(default=None, ge=1, le=50)
     system: str = Field(default="metric", max_length=10)
+
+
+class AutoPlanRequest(BaseModel):
+    days: int = Field(default=7, ge=1, le=14)
+    meals_per_day: int = Field(default=3, ge=1, le=6)
+    ceiling: float = Field(default=2000, ge=800, le=6000)
+    floor_protein: float = Field(default=150, ge=20, le=400)
+    floor_fibre: float = Field(default=25, ge=5, le=100)
+    max_repeats: int = Field(default=3, ge=1, le=14)
+    apply: bool = Field(default=False, description="Write it into the plan.")
+
+
+class RebalanceRequest(BaseModel):
+    ingredients: List[Dict[str, Any]]
+    food: str = Field(min_length=1, max_length=300)
+    grams: float = Field(gt=0, le=20000)
+    target: str = Field(default="p", max_length=4)
 
 
 class ManualPrice(BaseModel):
@@ -691,6 +708,53 @@ def scan_barcode(
         except Exception:  # noqa: BLE001
             session.rollback()
     return result
+
+
+@app.post("/api/plans/{plan_id}/autoplan")
+def autoplan(
+    plan_id: int,
+    body: AutoPlanRequest,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Fill the week from the saved library so each day meets its targets."""
+    plan = _owned_plan(session, user, plan_id)
+    library = [_recipe_json(r) for r in session.scalars(
+        select(Recipe).where(Recipe.user_id == user.id)).all()]
+
+    goals = {"ceiling": body.ceiling, "floorP": body.floor_protein,
+             "floorF": body.floor_fibre}
+    result = weekplan.plan_week(
+        library, goals, days=body.days, meals_per_day=body.meals_per_day,
+        max_repeats=body.max_repeats)
+
+    if body.apply and result["days"]:
+        names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+                 "Saturday", "Sunday"]
+        data = dict(plan.data or {})
+        _snapshot(session, plan)
+        data["week"] = [
+            {"day": names[i % 7], "meals": day["meals"]}
+            for i, day in enumerate(result["days"][:7])
+        ]
+        meta = dict(data.get("meta") or {})
+        meta.update({"ceiling": body.ceiling, "floorP": body.floor_protein,
+                     "floorF": body.floor_fibre})
+        data["meta"] = meta
+        plan.data = data
+        session.commit()
+        result["applied"] = True
+
+    return result
+
+
+@app.post("/api/rebalance")
+def rebalance(
+    body: RebalanceRequest,
+    user: User = Depends(auth.current_user),
+) -> Dict[str, Any]:
+    """Change one ingredient, and say what restores the target."""
+    return weekplan.rebalance(body.ingredients, body.food, body.grams, body.target)
 
 
 @app.get("/api/swaps")

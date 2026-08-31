@@ -269,13 +269,26 @@ def search(query: str, limit: int = 10, session: Optional[Any] = None) -> Dict[s
             "store": STORE_NAME,
         }
 
-    # A bot challenge returns 200 with a tiny body and no __NEXT_DATA__.
-    if len(response.text) < 20_000:
+    # Coles sits behind Imperva, which answers 200 with a short body carrying
+    # a JavaScript challenge instead of the page. Passing it means executing
+    # their script to earn a clearance cookie -- that is bot-protection
+    # evasion, not an integration, so this reports the block rather than
+    # working around it.
+    body = response.text
+    challenged = (
+        "_Incapsula_Resource" in body
+        or "Pardon Our Interruption" in body
+        or "__NEXT_DATA__" not in body
+    )
+    if challenged:
+        kind = ("Coles is blocking automated access with a JavaScript "
+                "challenge." if "_Incapsula_Resource" in body
+                else "Coles served an interstitial instead of results.")
         return {
             "status": "error",
             "query": query,
-            "message": "Coles served a challenge page instead of results "
-                       "(request rate too high, or blocked).",
+            "message": kind + " Woolworths prices are unaffected.",
+            "blocked": True,
             "products": [],
             "store": STORE_NAME,
         }

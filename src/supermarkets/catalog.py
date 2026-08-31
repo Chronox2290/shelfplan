@@ -10,9 +10,20 @@ pack price from the authoritative per-unit price instead.
 from typing import Any, Dict, List, Optional
 import re
 
+import threading
+import time
+
 from . import woolworths
 
 STORE_NAME = "woolworths"
+
+# Woolworths sits behind Akamai, which answers 403 "Access Denied" once it
+# decides a caller is a crawler -- and the block is on the address, so it takes
+# the whole household out. This module previously had no throttle at all, which
+# is how a catalogue seeding run earned one. One request at a time, spaced.
+_MIN_INTERVAL_S = 2.5
+_lock = threading.Lock()
+_last_request_at = 0.0
 
 # The search endpoint accepts a page size up to 36 and answers 400 above that.
 MAX_PAGE_SIZE = 36
@@ -161,7 +172,13 @@ def search(query: str, limit: int = 10, page: int = 1) -> Dict[str, Any]:
     practical: one request can carry 36 products instead of 10, and requests
     are the scarce resource here, not bandwidth.
     """
+    global _last_request_at
     try:
+        with _lock:
+            wait = _MIN_INTERVAL_S - (time.monotonic() - _last_request_at)
+            if wait > 0:
+                time.sleep(wait)
+            _last_request_at = time.monotonic()
         response = woolworths.requests.get(
             woolworths.API_URL,
             params={
@@ -187,13 +204,21 @@ def search(query: str, limit: int = 10, page: int = 1) -> Dict[str, Any]:
         # 4xx other than 429 means the request itself was wrong, which is our
         # fault and not the store refusing us. The distinction matters: the
         # circuit breaker must not take a store offline because of a bug here.
-        our_fault = 400 <= response.status_code < 500 and response.status_code not in (403, 429)
+        our_fault = (400 <= response.status_code < 500
+                     and response.status_code not in (403, 429))
+        blocked = response.status_code in (403, 429)
+        message = ("Woolworths is refusing requests from this address. It "
+                   "usually lifts within a few hours; indexed prices still "
+                   "work in the meantime."
+                   if blocked else
+                   f"API request failed with status {response.status_code}")
         return {
             "status": "error",
             "query": query,
-            "message": f"API request failed with status {response.status_code}",
+            "message": message,
             "products": [],
             "clientError": our_fault,
+            "blocked": blocked,
         }
 
     try:

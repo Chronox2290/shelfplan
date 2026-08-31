@@ -26,9 +26,10 @@ from . import pricing
 from .db import SessionLocal
 
 ENABLED = os.getenv("TRICKLE", "0") not in ("0", "false", "False", "")
-# Two minutes between requests is roughly a thousandth of what a crawler does
-# and has not tripped anything in testing.
-INTERVAL_S = max(20, int(os.getenv("TRICKLE_INTERVAL_SECONDS", "120") or 120))
+# Five minutes between requests. Both stores block on volume and the block
+# lands on the address, taking out everyone behind it, so this errs well on the
+# side of slow -- the catalogue has all day to fill.
+INTERVAL_S = max(60, int(os.getenv("TRICKLE_INTERVAL_SECONDS", "300") or 300))
 STORES = [s.strip() for s in
           os.getenv("TRICKLE_STORES", "coles,woolworths").split(",") if s.strip()]
 

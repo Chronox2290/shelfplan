@@ -367,6 +367,137 @@ button.tiny.done{background:var(--accent-soft);color:var(--accent);border-color:
 .dropzone input[type=file]{width:auto;background:none;border:0;padding:0}
 details summary{cursor:pointer}
 @media (max-width:560px){.spark-cell{display:none}}
+/* ---------------------------------------------------------------- mobile */
+/*
+ * A table is the wrong shape for a phone. Below 700px the rows stop being
+ * rows: each becomes a small stacked card, so nothing needs scrolling
+ * sideways to read. The markup is unchanged -- only its display is.
+ */
+@media (max-width: 700px) {
+  .wrap { padding-left: 12px; padding-right: 12px; }
+  .card { padding: 14px 13px; }
+  .scroll { overflow-x: visible; }
+
+  table, thead, tbody, tr, th, td { display: block; width: auto; }
+
+  /* Column headings mean nothing once the rows are stacked. */
+  table thead { position: absolute; left: -9999px; }
+
+  table tbody tr {
+    background: var(--panel);
+    border: 1px solid var(--hair);
+    border-radius: 10px;
+    padding: 11px 12px;
+    margin: 0 0 9px;
+  }
+  table tbody tr:last-child { margin-bottom: 0; }
+  table tbody td { border: 0; padding: 2px 0; text-align: left !important; }
+
+  /* Each cell says what it is, taken from the heading it replaced. */
+  table tbody td[data-label]:not(:first-child) {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+  table tbody td[data-label]:not(:first-child)::before {
+    content: attr(data-label);
+    font-size: 11.5px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    flex: none;
+  }
+  /* An empty value would leave a heading dangling on its own. */
+  table tbody td[data-label]:empty,
+  table tbody td[data-label="—"] { display: none; }
+
+  /* The aisle heading is a full-width divider, not a card. */
+  table tbody tr.aisle-row {
+    background: none;
+    border: 0;
+    padding: 14px 0 2px;
+    margin: 0;
+  }
+  table tbody tr.aisle-row td { padding: 0; }
+
+  /* Wider tap targets, and inputs that do not trigger iOS zoom. */
+  button, .btn { min-height: 44px; padding: 10px 15px; }
+  button.tiny { min-height: 36px; padding: 6px 12px; }
+  input, select, textarea { font-size: 16px; }
+  input.mult { min-height: 36px; width: 52px; }
+
+  .row { gap: 8px; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stat .v { font-size: 18px; }
+
+  /* The week is one day per row on a phone; four columns is unreadable. */
+  .calendar { grid-template-columns: 1fr; }
+
+  /* Sheets become bottom sheets, which is the phone convention. */
+  .sheet {
+    inset: auto 0 0 0;
+    transform: none;
+    width: 100%;
+    max-height: 88vh;
+    border-radius: 16px 16px 0 0;
+    padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  /* Tabs scroll but should not look cut off mid-word. */
+  nav.tabs { margin: 14px 0 16px; }
+  nav.tabs button { padding: 11px 12px; font-size: 14.5px; }
+
+  .goals-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .goals-row label { width: 100%; justify-content: space-between; }
+}
+
+/* ------------------------------------------------------------- recipes -- */
+/*
+ * Recipes ran together with nothing marking where one ended and the next
+ * began. They are now clearly bounded cards with a titled header.
+ */
+.recipe {
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.recipe > .recipe-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 13px 15px;
+  background: var(--sunk);
+  border-bottom: 1px solid var(--rule);
+}
+.recipe > .recipe-head h3 { font-size: 16px; line-height: 1.3; }
+.recipe > .recipe-body { padding: 13px 15px 15px; }
+.recipe .macros { margin-bottom: 12px; }
+.recipe h4 {
+  font-family: Archivo, sans-serif;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--ink-3);
+  margin: 16px 0 7px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hair);
+}
+.recipe h4:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.recipe .meal { padding: 5px 0; }
+.recipe-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 11px 15px;
+  background: var(--sunk);
+  border-top: 1px solid var(--rule);
+}
+.recipe-tags { display: flex; gap: 5px; flex-wrap: wrap; padding: 0 15px 11px; }
 </style>
 </head>
 <body>
@@ -438,6 +569,7 @@ details summary{cursor:pointer}
     <button role="tab" data-tab="prices" aria-selected="false">Prices</button>
     <button role="tab" data-tab="search" aria-selected="false">Find food</button>
     <button role="tab" data-tab="findrec" aria-selected="false">Find a recipe</button>
+    <button role="tab" data-tab="own" aria-selected="false">Write one</button>
     <button role="tab" data-tab="recipes" aria-selected="false">Recipes</button>
     <button role="tab" data-tab="data" aria-selected="false">Data</button>
   </nav>
