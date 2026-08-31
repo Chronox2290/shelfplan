@@ -25,8 +25,8 @@ from src.supermarkets import (catalog, recipe_import,  # noqa: E402
                               recipes, resolve, stores)
 
 from . import auth, mailer, passwords, pricing, security, trickle  # noqa: E402
-from .db import (Plan, PriceRecord, Product, Recipe, User,  # noqa: E402
-                 get_session, init_db)
+from .db import (Plan, PlanVersion, PriceRecord, Product,  # noqa: E402
+                 Recipe, User, get_session, init_db)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -358,6 +358,27 @@ def me(user: Optional[User] = Depends(auth.optional_user)) -> Dict[str, Any]:
 # Plans
 # --------------------------------------------------------------------------
 
+# How many versions of a plan to keep. Enough to walk back from a bad edit,
+# not so many that the database grows without limit.
+PLAN_HISTORY = 20
+
+
+def _snapshot(session: Session, plan: Plan) -> None:
+    """Keep the current contents before they are replaced."""
+    current = plan.data or {}
+    if not current:
+        return
+    session.add(PlanVersion(plan_id=plan.id, data=current))
+    old = session.scalars(
+        select(PlanVersion)
+        .where(PlanVersion.plan_id == plan.id)
+        .order_by(PlanVersion.id.desc())
+        .offset(PLAN_HISTORY)
+    ).all()
+    for row in old:
+        session.delete(row)
+
+
 def _plan_summary(plan: Plan) -> Dict[str, Any]:
     return {
         "id": plan.id,
@@ -419,9 +440,67 @@ def update_plan(
     if body.name is not None:
         plan.name = body.name
     if body.data is not None:
+        # Snapshot first: this endpoint replaces the whole document, so a
+        # client-side mistake would otherwise be unrecoverable.
+        _snapshot(session, plan)
         plan.data = body.data
     session.commit()
     return {**_plan_summary(plan), "data": plan.data}
+
+
+@app.get("/api/plans/{plan_id}/history")
+def plan_history(
+    plan_id: int,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Earlier versions of this plan, newest first."""
+    plan = _owned_plan(session, user, plan_id)
+    rows = session.scalars(
+        select(PlanVersion).where(PlanVersion.plan_id == plan.id)
+        .order_by(PlanVersion.id.desc())).all()
+    return {
+        "versions": [
+            {
+                "id": r.id,
+                "savedAt": r.saved_at.isoformat() if r.saved_at else None,
+                "meals": sum(len(d.get("meals") or [])
+                             for d in (r.data or {}).get("week") or []),
+                "shopItems": len((r.data or {}).get("shop") or {}),
+                "recipes": len((r.data or {}).get("recipes") or []),
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.post("/api/plans/{plan_id}/undo")
+def undo_plan(
+    plan_id: int,
+    version: Optional[int] = Query(None, description="A specific version id."),
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """Put a plan back to how it was before the last change.
+
+    The version being replaced is itself snapshotted, so undo can be undone.
+    """
+    plan = _owned_plan(session, user, plan_id)
+    stmt = select(PlanVersion).where(PlanVersion.plan_id == plan.id)
+    if version is not None:
+        stmt = stmt.where(PlanVersion.id == version)
+    row = session.scalars(stmt.order_by(PlanVersion.id.desc())).first()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "There is no earlier version of this plan.")
+
+    restored_at = row.saved_at.isoformat() if row.saved_at else ""
+    _snapshot(session, plan)
+    plan.data = row.data
+    session.delete(row)
+    session.commit()
+    return {**_plan_summary(plan), "restoredFrom": restored_at,
+            "data": plan.data}
 
 
 @app.delete("/api/plans/{plan_id}")
@@ -575,6 +654,36 @@ def recipe_options(
         diet=body.diet, exclude=body.exclude, cuisine=body.cuisine,
     )
     return {"options": options}
+
+
+@app.get("/api/swaps")
+def swaps(
+    food: str = Query(..., min_length=1, max_length=300),
+    priced: bool = Query(True),
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """What else could go in, and what it would change.
+
+    Prices come from the local catalogue only, so this is instant and does not
+    put a request to the supermarkets behind a hover.
+    """
+    options = recipes.swaps_for(food)
+    if priced:
+        for option in options:
+            hits = pricing.catalogue_search(
+                session, query=option["query"], limit=3, sort="cheapest")
+            best = next((p for p in hits["products"] if p.get("per_kg")), None)
+            option["perKg"] = best["per_kg"] if best else None
+            option["matched"] = best["name"] if best else None
+            option["image"] = best.get("image") if best else ""
+    return {"food": food, "options": options}
+
+
+@app.get("/api/foods")
+def foods(user: User = Depends(auth.current_user)) -> Dict[str, Any]:
+    """Per-100g figures for everything the builder knows about."""
+    return {"foods": recipes.food_table()}
 
 
 @app.get("/api/price")

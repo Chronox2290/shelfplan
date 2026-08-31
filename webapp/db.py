@@ -155,6 +155,24 @@ class Recipe(Base):
     )
 
 
+class PlanVersion(Base):
+    """A snapshot of a plan taken before it was overwritten.
+
+    Plans are edited constantly -- ticking an item saves the whole document --
+    so a bug or a mis-click can wipe a week's work with no way back. Keeping
+    the last few versions makes that recoverable instead of final.
+    """
+
+    __tablename__ = "plan_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plan_id: Mapped[int] = mapped_column(
+        ForeignKey("plans.id", ondelete="CASCADE"), index=True
+    )
+    data: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+    saved_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class PriceCache(Base):
     """Store search results shared by every user of this server.
 

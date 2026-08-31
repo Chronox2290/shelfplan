@@ -980,3 +980,60 @@ def build_options(
         recipe["option"] = chr(ord("A") + len(out))
         out.append(recipe)
     return out
+
+
+def swaps_for(food: str, limit: int = 4) -> List[Dict[str, Any]]:
+    """Alternatives to one ingredient, with the nutritional consequence.
+
+    A swap is only useful if you know what it costs you, so each option carries
+    the change per 100g rather than just a name. Same role only -- offering rice
+    instead of chicken is not a substitution, it is a different meal.
+    """
+    meta = INGREDIENTS.get(food)
+    if not meta:
+        return []
+
+    role = meta["role"]
+    tags = meta.get("tags") or set()
+    options = []
+    for name, other in INGREDIENTS.items():
+        if name == food or other["role"] != role:
+            continue
+        options.append({
+            "food": name,
+            "query": other["query"],
+            "pack": other["pack"],
+            "aisle": other.get("aisle", "pantry"),
+            "dKcal": round(other["kcal"] - meta["kcal"], 1),
+            "dProtein": round(other["p"] - meta["p"], 1),
+            "dCarb": round(other["c"] - meta["c"], 1),
+            "dFat": round(other["f"] - meta["f"], 1),
+            "dFibre": round(other["fb"] - meta["fb"], 1),
+            # A swap that breaks the diet you are eating is not an option.
+            "keepsVegan": "vegan" in (other.get("tags") or set()),
+            "keepsVegetarian": bool(
+                {"vegetarian", "vegan"} & (other.get("tags") or set())),
+            "sameDiet": bool(tags & (other.get("tags") or set())) or not tags,
+        })
+
+    # Closest in calories first: the least disruptive substitution is usually
+    # the one someone actually wants.
+    options.sort(key=lambda o: abs(o["dKcal"]))
+    return options[:limit]
+
+
+def food_table() -> List[Dict[str, Any]]:
+    """Every ingredient with its per-100g figures, for a reference view."""
+    return [
+        {
+            "food": name,
+            "role": meta["role"],
+            "aisle": meta.get("aisle", "pantry"),
+            "query": meta["query"],
+            "pack": meta["pack"],
+            "kcal": meta["kcal"], "p": meta["p"], "c": meta["c"],
+            "f": meta["f"], "fb": meta["fb"],
+            "tags": sorted(meta.get("tags") or []),
+        }
+        for name, meta in sorted(INGREDIENTS.items())
+    ]

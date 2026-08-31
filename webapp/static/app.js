@@ -631,6 +631,198 @@ async function loadRecipes() {
 
 /* ------------------------------------------------------------ week plan */
 
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
+              'Saturday', 'Sunday'];
+
+const CAT_LABEL = { chicken: 'Chicken', beef: 'Beef', pork: 'Pork',
+                    lamb: 'Lamb', fish: 'Fish & seafood',
+                    vegetarian: 'Vegetarian', other: 'Other' };
+const CAT_ORDER = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'vegetarian', 'other'];
+
+const week = { picker: null, monday: null };
+
+// A day is judged against a ceiling you should stay under and floors you
+// should get past -- which is how people actually eat, rather than hitting an
+// exact number at every single meal.
+const DEFAULT_GOALS = { ceiling: 2000, floorP: 140, floorF: 25 };
+
+function goals() {
+  const d = state.plan.data;
+  d.meta = d.meta || {};
+  const m = d.meta;
+  return {
+    ceiling: Number(m.ceiling) || DEFAULT_GOALS.ceiling,
+    floorP: Number(m.floorP) || DEFAULT_GOALS.floorP,
+    floorF: Number(m.floorF) || DEFAULT_GOALS.floorF,
+  };
+}
+
+function weekData() {
+  const d = state.plan.data;
+  // Normalise to seven days WITHOUT discarding anything. The previous version
+  // replaced the whole week whenever its length was not exactly seven, which
+  // silently destroyed every planned meal and then persisted that on the next
+  // save. Padding and preserving is the only safe way to reshape user data.
+  const existing = Array.isArray(d.week) ? d.week : [];
+  d.week = DAYS.map((name, i) => {
+    const prior = existing[i] || existing.find((x) => x && x.day === name) || {};
+    return { day: name, meals: Array.isArray(prior.meals) ? prior.meals : [] };
+  });
+  // Anything beyond seven days is kept rather than dropped, folded onto the
+  // last day, so no meal disappears because a plan had an odd shape.
+  existing.slice(7).forEach((extra) => {
+    if (extra && Array.isArray(extra.meals) && extra.meals.length) {
+      d.week[6].meals = d.week[6].meals.concat(extra.meals);
+    }
+  });
+  // Meals gained an on/off switch; older plans predate it and are all "on".
+  d.week.forEach((day) => day.meals.forEach((m) => {
+    if (m.on === undefined) m.on = true;
+  }));
+  return d.week;
+}
+
+function recipeById(id) {
+  return (state.recipes || []).find((r) => r.id === Number(id));
+}
+
+function dayTotals(day) {
+  const out = { kcal: 0, p: 0, c: 0, f: 0, fb: 0, meals: 0 };
+  (day.meals || []).forEach((m) => {
+    if (m.on === false) return;
+    const r = recipeById(m.recipeId);
+    if (!r || !r.perServing) return;
+    const n = m.servings || 1;
+    out.kcal += (r.perServing.kcal || 0) * n;
+    out.p += (r.perServing.p || 0) * n;
+    out.c += (r.perServing.c || 0) * n;
+    out.f += (r.perServing.f || 0) * n;
+    out.fb += (r.perServing.fb || 0) * n;
+    out.meals += 1;
+  });
+  return out;
+}
+
+// A bar that reads at a glance: green when the day works, amber when it does
+// not, with the number that matters spelled out underneath.
+function goalBar(label, value, target, kind) {
+  const pct = target ? Math.min(100, (value / target) * 100) : 0;
+  const good = kind === 'ceiling' ? value <= target : value >= target;
+  const gap = kind === 'ceiling' ? target - value : target - value;
+  const detail = kind === 'ceiling'
+    ? (good ? `${Math.round(gap)} to spare` : `${Math.round(-gap)} over`)
+    : (good ? 'met' : `${Math.round(gap)} short`);
+  return `<div class="goal ${good ? 'ok' : 'miss'}">
+    <div class="goal-top"><span>${esc(label)}</span>
+      <span class="num">${Math.round(value)}<span class="muted"> / ${target}</span></span></div>
+    <div class="goal-track"><i style="width:${pct.toFixed(0)}%"></i></div>
+    <div class="goal-note">${esc(detail)}</div>
+  </div>`;
+}
+
+function viewWeek() {
+  const data = weekData();
+  const library = state.recipes || [];
+  const g = goals();
+
+  if (!library.length) {
+    return `<div class="card"><h2>Plan your week</h2>
+      <p class="sub">Your library is empty. Build recipes in the
+        <b>Recipe builder</b> and save them, then plan days here.</p></div>`;
+  }
+
+  if (!week.monday) week.monday = mondayOf(new Date());
+  const from = new Date(week.monday);
+  const to = dayDate(6);
+
+  let weekKcal = 0;
+  let meals = 0;
+  let daysOk = 0;
+  let daysPlanned = 0;
+
+  const cards = data.map((day, di) => {
+    const date = dayDate(di);
+    const t = dayTotals(day);
+    weekKcal += t.kcal;
+    meals += t.meals;
+    if (t.meals) {
+      daysPlanned += 1;
+      if (t.kcal <= g.ceiling && t.p >= g.floorP && t.fb >= g.floorF) daysOk += 1;
+    }
+
+    const rows = (day.meals || []).map((m, mi) => {
+      const r = recipeById(m.recipeId);
+      if (!r) return '';
+      const per = r.perServing || {};
+      const off = m.on === false;
+      return `<div class="meal planned${off ? ' off' : ''}">
+        <label class="tick" title="${off ? 'Skipped' : 'Eating this'}">
+          <input type="checkbox" data-on="${di}:${mi}" ${off ? '' : 'checked'}>
+          <span class="dot cat-${esc(categoryOf(r))}"></span>
+          <span class="meal-name">${esc(r.name)}</span></label>
+        <div class="meal-controls">
+          <input type="number" class="mult" data-mult="${di}:${mi}"
+            value="${m.servings || 1}" min="1" max="9" title="Servings">
+          <span class="muted num small">${Math.round((per.kcal || 0) * (m.servings || 1))} kcal</span>
+          <button class="ghost tiny" data-rm="${di}:${mi}" title="Remove">&times;</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    const summary = t.meals ? `<div class="day-goals">
+        ${goalBar('kcal', t.kcal, g.ceiling, 'ceiling')}
+        ${goalBar('protein', t.p, g.floorP, 'floor')}
+        ${goalBar('fibre', t.fb, g.floorF, 'floor')}
+      </div>` : '';
+
+    return `<div class="day${isToday(date) ? ' today' : ''}">
+      <h3><span>${esc(day.day)}</span><span class="muted num">${shortDate(date)}</span></h3>
+      ${rows || '<p class="muted small" style="margin:4px 0">Nothing planned.</p>'}
+      ${summary}
+      <button class="tiny add-day" data-pick="${di}">+ Add a meal</button>
+    </div>`;
+  }).join('');
+
+  return `<div class="card">
+    <div class="row"><div style="flex:1">
+      <h2>Plan your week</h2>
+      <p class="sub" style="margin:0">${shortDate(from)} &ndash; ${shortDate(to)}
+        &middot; ${meals} meal${meals === 1 ? '' : 's'}</p></div>
+      <button id="weekPrev" class="ghost" title="Previous week">&larr;</button>
+      <button id="weekToday" class="ghost">This week</button>
+      <button id="weekNext" class="ghost" title="Next week">&rarr;</button>
+    </div>
+
+    <div class="row goals-row">
+      <span class="muted small">Each day:</span>
+      <label class="muted small">under
+        <input type="number" id="gCeiling" value="${g.ceiling}" min="800" max="6000"
+          step="50" style="width:74px"> kcal</label>
+      <label class="muted small">at least
+        <input type="number" id="gFloorP" value="${g.floorP}" min="20" max="400"
+          step="5" style="width:64px"> g protein</label>
+      <label class="muted small">at least
+        <input type="number" id="gFloorF" value="${g.floorF}" min="5" max="100"
+          style="width:56px"> g fibre</label>
+    </div>
+
+    <div class="row" style="margin-top:12px">
+      <button id="weekShop" class="primary">Build shopping list</button>
+      <button id="weekClear" class="ghost">Clear week</button>
+      <button id="planUndo" class="ghost" title="Restore the previous version of this plan">Undo</button>
+    </div>
+
+    <div class="stats" style="margin-top:14px">
+      <div class="stat"><div class="k">Days that work</div>
+        <div class="v">${daysOk}<span class="muted" style="font-size:15px">/${daysPlanned || 0}</span></div></div>
+      <div class="stat"><div class="k">Meals</div><div class="v">${meals}</div></div>
+      <div class="stat"><div class="k">Week energy</div>
+        <div class="v">${Math.round(weekKcal).toLocaleString()}</div></div>
+    </div>
+    <div id="weekOut"></div>
+    <div class="calendar">${cards}</div></div>`;
+}
+
 
 
 
@@ -1314,27 +1506,6 @@ async function loadCatalogueStats() {
 
 /* ------------------------------------------------------------ week plan */
 
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
-              'Saturday', 'Sunday'];
-
-const CAT_LABEL = { chicken: 'Chicken', beef: 'Beef', pork: 'Pork',
-                    lamb: 'Lamb', fish: 'Fish & seafood',
-                    vegetarian: 'Vegetarian', other: 'Other' };
-const CAT_ORDER = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'vegetarian', 'other'];
-
-const week = { picker: null, monday: null };
-
-function weekData() {
-  const d = state.plan.data;
-  if (!Array.isArray(d.week) || d.week.length !== 7) {
-    d.week = DAYS.map((name) => ({ day: name, meals: [] }));
-  }
-  return d.week;
-}
-
-function recipeById(id) {
-  return (state.recipes || []).find((r) => r.id === Number(id));
-}
 
 // A recipe earns its place in Favourites by being rated well or cooked more
 // than once -- which is what the "Cooked it" counter is for.
@@ -1369,68 +1540,6 @@ function isToday(d) {
   return d.toDateString() === now.toDateString();
 }
 
-function viewWeek() {
-  const data = weekData();
-  const library = state.recipes || [];
-
-  if (!library.length) {
-    return `<div class="card"><h2>Plan your week</h2>
-      <p class="sub">Your library is empty. Build recipes in the
-        <b>Recipe builder</b> and save them, then plan days here.</p></div>`;
-  }
-
-  if (!week.monday) week.monday = mondayOf(new Date());
-  const from = new Date(week.monday);
-  const to = dayDate(6);
-
-  let kcal = 0;
-  let meals = 0;
-
-  const cards = data.map((day, di) => {
-    const date = dayDate(di);
-    const rows = (day.meals || []).map((m, mi) => {
-      const r = recipeById(m.recipeId);
-      if (!r) return '';
-      const per = r.perServing || {};
-      kcal += (per.kcal || 0) * (m.servings || 1);
-      meals += 1;
-      return `<div class="meal row">
-        <span class="dot cat-${esc(categoryOf(r))}" title="${esc(CAT_LABEL[categoryOf(r)])}"></span>
-        <span style="flex:1;min-width:0">${esc(r.name)}</span>
-        <span class="muted num">${Math.round(per.kcal || 0)}&times;${m.servings || 1}</span>
-        <button class="ghost tiny" data-rm="${di}:${mi}" title="Remove">&times;</button>
-      </div>`;
-    }).join('');
-    return `<div class="day${isToday(date) ? ' today' : ''}">
-      <h3><span>${esc(day.day)}</span><span class="muted num">${shortDate(date)}</span></h3>
-      ${rows || '<p class="muted small" style="margin:4px 0">Nothing planned.</p>'}
-      <button class="tiny add-day" data-pick="${di}">+ Add a meal</button>
-    </div>`;
-  }).join('');
-
-  return `<div class="card">
-    <div class="row"><div style="flex:1">
-      <h2>Plan your week</h2>
-      <p class="sub" style="margin:0">${shortDate(from)} &ndash; ${shortDate(to)}
-        &middot; ${meals} meal${meals === 1 ? '' : 's'}</p></div>
-      <button id="weekPrev" class="ghost" title="Previous week">&larr;</button>
-      <button id="weekToday" class="ghost">This week</button>
-      <button id="weekNext" class="ghost" title="Next week">&rarr;</button>
-    </div>
-    <div class="row" style="margin-top:12px">
-      <button id="weekShop" class="primary">Build shopping list</button>
-      <button id="weekClear" class="ghost">Clear week</button>
-    </div>
-    <div class="stats" style="margin-top:14px">
-      <div class="stat"><div class="k">Meals</div><div class="v">${meals}</div></div>
-      <div class="stat"><div class="k">Total energy</div>
-        <div class="v">${Math.round(kcal).toLocaleString()}</div></div>
-      <div class="stat"><div class="k">Avg per meal</div>
-        <div class="v">${meals ? Math.round(kcal / meals) : 0}</div></div>
-    </div>
-    <div id="weekOut"></div>
-    <div class="calendar">${cards}</div></div>`;
-}
 
 /* ---- the picker ---- */
 
@@ -1525,6 +1634,40 @@ function wireWeek() {
     b.addEventListener('click', () => openPicker(Number(b.dataset.pick)));
   });
 
+  // Skip a meal without deleting it -- the plan for a day you eat out is not
+  // the same as never having planned it.
+  document.querySelectorAll('[data-on]').forEach((box) => {
+    box.addEventListener('change', async () => {
+      const [di, mi] = box.dataset.on.split(':').map(Number);
+      weekData()[di].meals[mi].on = box.checked;
+      await savePlan();
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-mult]').forEach((input) => {
+    input.addEventListener('change', async () => {
+      const [di, mi] = input.dataset.mult.split(':').map(Number);
+      weekData()[di].meals[mi].servings = Math.max(1, Number(input.value) || 1);
+      await savePlan();
+      render();
+    });
+  });
+
+  const saveGoal = async (id, key) => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener('change', async () => {
+      state.plan.data.meta = state.plan.data.meta || {};
+      state.plan.data.meta[key] = Number(el.value) || 0;
+      await savePlan();
+      render();
+    });
+  };
+  saveGoal('gCeiling', 'ceiling');
+  saveGoal('gFloorP', 'floorP');
+  saveGoal('gFloorF', 'floorF');
+
   document.querySelectorAll('[data-rm]').forEach((b) => {
     b.addEventListener('click', async () => {
       const [di, mi] = b.dataset.rm.split(':').map(Number);
@@ -1550,6 +1693,26 @@ function wireWeek() {
     render();
   });
 
+  const undo = $('planUndo');
+  if (undo) {
+    undo.addEventListener('click', async () => {
+      try {
+        const res = await api('/plans/' + state.planId + '/undo', { method: 'POST' });
+        await loadPlan();
+        render();
+        const out = $('weekOut');
+        if (out) {
+          out.innerHTML = `<div class="note">Restored the version saved
+            ${esc(res.restoredFrom || 'earlier')}. Press Undo again to go back
+            further.</div>`;
+        }
+      } catch (err) {
+        const out = $('weekOut');
+        if (out) out.innerHTML = `<div class="err">${esc(err.message)}</div>`;
+      }
+    });
+  }
+
   const clear = $('weekClear');
   if (clear) {
     clear.addEventListener('click', async () => {
@@ -1564,10 +1727,13 @@ function wireWeek() {
   if (build) {
     build.addEventListener('click', async () => {
       const totals = {};
+      const pantry = new Set(Object.keys(state.plan.data.pantry || {}));
       weekData().forEach((day) => (day.meals || []).forEach((m) => {
+        if (m.on === false) return;   // a skipped meal is not shopped for
         const r = recipeById(m.recipeId);
         if (!r) return;
         (r.ingredients || []).forEach((i) => {
+          if (pantry.has(i.food)) return;   // already on the shelf at home
           const line = totals[i.food] || (totals[i.food] = {
             aisle: i.aisle || 'pantry', woo: i.query || i.food,
             pack: i.pack || null, grams: 0, usedIn: [],
@@ -1596,7 +1762,8 @@ function wireWeek() {
       state.plan.data.got = [];
       await savePlan();
       $('weekOut').innerHTML = `<div class="note">Shopping list built:
-        ${Object.keys(totals).length} items. Open the
+        ${Object.keys(totals).length} items${pantry.size
+          ? `, skipping ${pantry.size} already in your pantry` : ''}. Open the
         <b>Shopping list</b> tab to price and tick them off.</div>`;
     });
   }

@@ -884,3 +884,54 @@ commit would contain before the first push:
 git status --short
 git check-ignore .env data/shelfplan.db backups
 ```
+
+## Daily targets
+
+Borrowed from the earlier desktop version of this planner, which had the better
+idea: judge a **day**, not a meal. Each day is measured against a ceiling to
+stay under and floors to get past.
+
+```
+kcal      1938 / 2000     62 to spare
+protein    122 / 140      18 short
+fibre       33 / 25       met
+```
+
+Set the three numbers once at the top of the week; every day is then scored
+against them and "Days that work" counts how many pass all three. This is much
+closer to how people eat than hitting an exact figure at every meal.
+
+Meals can be **switched off** without deleting them -- a day you are eating out
+still has a plan -- and each carries a serving multiplier. A switched-off meal
+counts for neither the daily totals nor the shopping list.
+
+## Swaps
+
+`GET /api/swaps?food=...` answers "what else could go in, and what would it
+cost me". Alternatives are same-role only, sorted by how little they disturb
+the calories, and each carries the change per 100g plus its price from the
+local catalogue:
+
+```
+Dried red lentils   for brown rice   -9 kcal   +17.5g protein   +27.6g fibre
+Firm tofu           for chicken     -21 kcal   -16.0g protein   $5.56/kg
+```
+
+These are derived from the ingredient table rather than hand-written, so they
+stay correct as ingredients are added.
+
+## Undo
+
+Plans are saved as a whole document -- ticking one item rewrites everything --
+so a bug or a mis-click could previously destroy a week with no way back. That
+happened during development, which is why this exists.
+
+Every write snapshots the previous contents first. The last 20 versions are
+kept, `Undo` in the week header restores the most recent, and undo is itself
+undoable. `GET /api/plans/{id}/history` lists what is available with a count of
+what each version held.
+
+The fault that prompted it: normalising a week to seven days *replaced* the
+whole array whenever its length differed, discarding every planned meal, and
+the next save made that permanent. It now pads and preserves, and folds any
+extra days onto the last rather than dropping them.
