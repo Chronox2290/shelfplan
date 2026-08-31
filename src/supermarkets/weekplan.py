@@ -541,6 +541,99 @@ def _summarise(days: List[Dict[str, Any]], goals: Dict[str, float],
             f"fix it.{note}")
 
 
+def cook_sheet(days: Sequence[Dict[str, Any]],
+              by_id: Dict[Any, Dict[str, Any]]) -> Dict[str, Any]:
+    """What Sunday actually looks like: what to cook, in what order, how long.
+
+    Not seven recipes -- whatever distinct dishes the week actually landed on,
+    each batched to the total servings it is needed for and scheduled against
+    two things that can only do one job at a time: the oven, and the stove
+    (modelled as two burners, which is what most kitchens actually have).
+    Everything else -- mixing a jar, blending a smoothie -- has no device to
+    wait on and slots in wherever there is a moment free.
+
+    The oven and a simmering pot need starting, not minding, so the clock only
+    advances by the active minutes of putting something on -- the passive
+    minutes tie up the device, not the cook, which is what lets the next
+    thing start before this one finishes. Two stovetop burners rather than
+    one is why a mince base and a pot of pasta can run at once, the way an
+    actual Sunday does it.
+    """
+    need: Dict[Any, float] = {}
+    sittings: Dict[Any, int] = {}
+    for day in days:
+        for m in day.get("meals", []):
+            rid = m["recipeId"]
+            need[rid] = need.get(rid, 0.0) + float(m.get("servings") or 1.0)
+            sittings[rid] = sittings.get(rid, 0) + 1
+
+    items = []
+    for rid, total_servings in need.items():
+        recipe = by_id.get(rid)
+        if not recipe:
+            continue
+        makes = recipe.get("servings") or 4
+        batches = max(0.5, round(total_servings / makes * 2) / 2)
+        items.append({
+            "recipeId": rid,
+            "name": recipe.get("name", ""),
+            "device": recipe.get("device", "stovetop"),
+            "batches": batches,
+            "sittings": sittings[rid],
+            "activeMinutes": recipe.get("activeMinutes", 10),
+            "passiveMinutes": recipe.get("passiveMinutes", 0),
+        })
+
+    # Longest passive time first -- start the things that need nothing from
+    # you for the next forty minutes, then fill that time with everything
+    # that needs your hands the whole way through.
+    items.sort(key=lambda x: -x["passiveMinutes"])
+
+    oven_free = 0.0
+    stove_free = [0.0, 0.0]
+    clock = 0.0
+    steps = []
+    for it in items:
+        active, passive = it["activeMinutes"], it["passiveMinutes"]
+        if it["device"] == "oven":
+            start = max(clock, oven_free)
+            oven_free = start + active + passive
+            # The cook is only tied up putting it in, same as a pot left to
+            # simmer -- free again once the active minutes are done, which is
+            # what lets the next thing start before this one finishes.
+            clock = start + active
+            note = (f"in for {passive} minutes" if passive
+                    else "in, done as soon as it colours")
+        elif it["device"] == "stovetop":
+            lane = 0 if stove_free[0] <= stove_free[1] else 1
+            start = max(clock, stove_free[lane])
+            stove_free[lane] = start + active + passive
+            clock = start + active
+            note = (f"on the stove, simmering {passive} minutes unattended"
+                    if passive else "on the stove")
+        else:
+            start = clock
+            clock = start + active
+            note = "no cooking, just assembled"
+        steps.append({
+            "atMinute": round(start),
+            "name": it["name"],
+            "device": it["device"],
+            "batches": it["batches"],
+            "sittings": it["sittings"],
+            "minutes": active + passive,
+            "note": note,
+        })
+
+    steps.sort(key=lambda s: s["atMinute"])
+    total_minutes = round(max(oven_free, stove_free[0], stove_free[1], clock))
+    return {
+        "steps": steps,
+        "totalMinutes": total_minutes,
+        "dishCount": len(items),
+    }
+
+
 def rebalance(
     ingredients: Sequence[Dict[str, Any]],
     changed_food: str,

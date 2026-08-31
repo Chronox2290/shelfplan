@@ -327,7 +327,7 @@ function render() {
   if (state.tab === 'data') wireData();
   if (state.tab === 'prices') wirePrices();
   if (state.tab === 'build') wireBuild();
-  if (state.tab === 'week') { wireAuto(); wireWeek(); }
+  if (state.tab === 'week') { wireAuto(); wireWeek(); wireCookSheet(); }
   if (state.tab === 'recipes') { wireBook(); wireRecipes(); }
   if (state.tab === 'findrec') wireFindRecipe();
   if (state.tab === 'own') wireOwn();
@@ -1371,6 +1371,7 @@ calorie target instead of stopping short of it">
     <div class="row" style="margin-top:12px">
       <button id="weekShop" class="primary">Build shopping list</button>
       <button id="autoOpen">Plan it for me</button>
+      <button id="cookOpen">${cookSheet.show ? 'Hide the cook sheet' : 'Sunday cook sheet'}</button>
       <button id="weekDetail" class="ghost"
         title="Show what goes into each meal">${
         week.detail ? 'Hide ingredients' : 'Show ingredients'}</button>
@@ -1378,6 +1379,7 @@ calorie target instead of stopping short of it">
       <button id="planUndo" class="ghost" title="Restore the previous version of this plan">Undo</button>
     </div>
     <div id="autoHost">${auto.show ? autoPanel() : ''}</div>
+    <div id="cookHost">${cookSheet.show ? cookSheetPanel() : ''}</div>
 
     <div class="row day-nav">
       <div class="seg">
@@ -4248,6 +4250,81 @@ missing rather than telling you to go and build recipes first.               */
 
 const auto = { busy: false, result: null, show: false };
 
+const cookSheet = { show: false, data: null, busy: false, error: '' };
+
+const DEVICE_LABEL = {
+  oven: 'Oven', stovetop: 'Stovetop', assemble: 'No cooking', blender: 'Blender',
+};
+
+function clockLabel(totalMinutes) {
+  const h = Math.floor(totalMinutes / 60);
+  const m = Math.round(totalMinutes % 60);
+  return h ? `${h}h ${m}m` : `${m} min`;
+}
+
+function cookSheetPanel() {
+  const d = cookSheet.data;
+  return `<div class="card auto-card">
+    <div class="row" style="align-items:baseline">
+      <div style="flex:1;min-width:0">
+        <h2 style="margin:0">Sunday cook sheet</h2>
+        <p class="sub" style="margin:4px 0 0">What the current week actually
+          takes to cook -- one thing at a time on the oven, two on the stove,
+          everything else fitted in around them.</p>
+      </div>
+      <button class="ghost tiny" id="cookRefresh" ${cookSheet.busy ? 'disabled' : ''}>${
+        cookSheet.busy ? 'Working…' : 'Refresh'}</button>
+    </div>
+    ${cookSheet.error ? `<div class="err" style="margin-top:12px">${esc(cookSheet.error)}</div>` : ''}
+    ${!d ? '<p class="muted small" style="margin-top:12px">Loading…</p>' : (
+      !d.steps.length
+        ? `<p class="muted" style="margin-top:12px">${esc(d.message || 'Nothing planned yet.')}</p>`
+        : `<div class="stats" style="margin-top:14px">
+             <div class="stat"><div class="k">Dishes to cook</div>
+               <div class="v">${d.dishCount}</div></div>
+             <div class="stat"><div class="k">Start to finish</div>
+               <div class="v">${clockLabel(d.totalMinutes)}</div></div>
+           </div>
+           <div class="scroll" style="margin-top:12px"><table>
+             <thead><tr><th>Clock</th><th>Dish</th><th>Where</th><th class="r">Batch</th></tr></thead>
+             <tbody>${d.steps.map((s) => `<tr>
+               <td class="num" style="white-space:nowrap">${clockLabel(s.atMinute)}</td>
+               <td><b>${esc(s.name)}</b>
+                 <div class="muted small">${esc(s.note)} &middot; eaten ${
+                   s.sittings} time${s.sittings === 1 ? '' : 's'} this week</div></td>
+               <td class="muted small">${esc(DEVICE_LABEL[s.device] || s.device)}</td>
+               <td class="r num">${s.batches}&times;</td>
+             </tr>`).join('')}</tbody>
+           </table></div>`
+    )}
+  </div>`;
+}
+
+async function loadCookSheet() {
+  cookSheet.busy = true;
+  cookSheet.error = '';
+  render();
+  try {
+    cookSheet.data = await api('/plans/' + state.planId + '/cook-sheet');
+  } catch (err) {
+    cookSheet.error = err.message;
+  }
+  cookSheet.busy = false;
+  render();
+}
+
+function wireCookSheet() {
+  const open = $('cookOpen');
+  if (open) open.addEventListener('click', () => {
+    cookSheet.show = !cookSheet.show;
+    if (cookSheet.show && !cookSheet.data) { loadCookSheet(); return; }
+    render();
+  });
+  const refresh = $('cookRefresh');
+  if (refresh) refresh.addEventListener('click', loadCookSheet);
+}
+
+
 function autoPanel() {
   const g = goals();
   return `<div class="card auto-card">
@@ -4267,10 +4344,12 @@ function autoPanel() {
         <input id="aFibre" type="number" value="${Math.round(g.floorF)}" min="5" max="100" step="1"></div>
       <div><label for="aMeals">Meals a day</label>
         <input id="aMeals" type="number" value="3" min="1" max="6"></div>
-      <div><label for="aRepeat">Same dish, at most</label>
+      <div><label for="aRepeat" title="How many days a dish can repeat. Lower means more variety and more cooking on Sunday; higher means fewer dishes and a shorter one.">Same dish, at most</label>
         <input id="aRepeat" type="number" value="5" min="1" max="14"></div>
       <div><label for="aBudget">Week's shopping, at most ($)</label>
         <input id="aBudget" type="number" value="120" min="20" max="2000" step="10"></div>
+      <div><label for="aMinutes">Sunday, at most (minutes)</label>
+        <input id="aMinutes" type="number" placeholder="no limit" min="20" max="600" step="10"></div>
       <div><label for="aCuisine">Theme for anything new</label>
         <select id="aCuisine">${(state.cuisines || [{ id: 'any', label: 'No theme' }])
           .map((c) => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}
@@ -4316,8 +4395,17 @@ function autoSummary(res) {
     </div>`;
   }).join('');
 
-  const spend = res.estimatedCost != null ? `<div class="spend">
-      <div class="spend-row">
+  const cookNote = res.cookMinutes != null ? (() => {
+    const h = Math.floor(res.cookMinutes / 60);
+    const m = res.cookMinutes % 60;
+    const clock = h ? `${h}h ${m}m` : `${m} min`;
+    return `<div class="spend-row"><span>Sunday, start to finish</span>
+      <b class="num">${clock}</b></div>`;
+  })() : '';
+
+  const spend = (res.estimatedCost != null || cookNote) ? `<div class="spend">
+      ${cookNote}
+      ${res.estimatedCost != null ? `<div class="spend-row">
         <span>At the till</span><b class="num">${money(res.estimatedCost)}</b></div>
       <div class="spend-row">
         <span>Eaten this week</span><b class="num">${money(res.eatenCost)}</b></div>
@@ -4326,7 +4414,7 @@ function autoSummary(res) {
       ${(res.mostlyLeftOver || []).length ? `<div class="muted small"
         style="margin-top:8px">Mostly left over: ${res.mostlyLeftOver.map((x) =>
           `${esc(shortFood(x.food))} ${money(x.spend)} (${x.usedPercent}% used)`)
-          .join(' &middot; ')}</div>` : ''}
+          .join(' &middot; ')}</div>` : ''}` : ''}
     </div>` : '';
 
   return `<div class="row" style="align-items:baseline;margin-bottom:6px">
@@ -4340,6 +4428,8 @@ function autoSummary(res) {
       choose from them, and cheaper ones it composed did not hold the targets.
       Deleting the dearer recipes and planning again lets it build to the
       budget from scratch.</div>` : ''}
+    ${res.fewerDishesForTime ? `<div class="note" style="margin-top:10px">
+      Leaned on repeats rather than variety to fit the time you gave Sunday.</div>` : ''}
     <div class="auto-days">${rows}</div>`;
 }
 
@@ -4357,22 +4447,28 @@ function wireAuto() {
   const go = $('aGo');
   if (!go) return;
   go.addEventListener('click', async () => {
+    // Read every field before the next line touches the DOM. `render()`
+    // rebuilds this form from scratch, and every field below except the
+    // three reading live goals() falls back to its hardcoded default the
+    // instant that happens -- so a budget or a repeat count typed in was
+    // being silently discarded and the server-side default sent instead.
+    const body = {
+      days: 7,
+      meals_per_day: Number($('aMeals').value) || 3,
+      ceiling: Number($('aKcal').value) || 2000,
+      floor_protein: Number($('aProt').value) || 150,
+      floor_fibre: Number($('aFibre').value) || 25,
+      max_repeats: Number($('aRepeat').value) || 3,
+      cuisine: ($('aCuisine') || {}).value || 'any',
+      diet: ($('aDiet') || {}).value || 'any',
+      budget: Number($('aBudget').value) || null,
+      max_sunday_minutes: Number(($('aMinutes') || {}).value) || null,
+      even_meals: !!($('aEven') || {}).value,
+      apply: true,
+    };
     auto.busy = true;
     render();
     try {
-      const body = {
-        days: 7,
-        meals_per_day: Number($('aMeals').value) || 3,
-        ceiling: Number($('aKcal').value) || 2000,
-        floor_protein: Number($('aProt').value) || 150,
-        floor_fibre: Number($('aFibre').value) || 25,
-        max_repeats: Number($('aRepeat').value) || 3,
-        cuisine: ($('aCuisine') || {}).value || 'any',
-        diet: ($('aDiet') || {}).value || 'any',
-        budget: Number($('aBudget').value) || null,
-        even_meals: !!($('aEven') || {}).value,
-        apply: true,
-      };
       auto.result = await api('/plans/' + state.planId + '/autoplan',
         { method: 'POST', body });
       // The planner may have composed dishes and it writes the day's targets

@@ -199,6 +199,9 @@ class AutoPlanRequest(BaseModel):
     # Breakfast smaller than dinner, or three identical portions. Batch-cooking
     # one dish for the whole day is a real way to eat, so it stays a choice.
     even_meals: bool = Field(default=False)
+    # How long Sunday is allowed to take, cooking everything the week needs.
+    # A budget on time, the same kind of constraint as the one on money.
+    max_sunday_minutes: Optional[float] = Field(default=None, ge=20, le=600)
 
 
 class RebalanceRequest(BaseModel):
@@ -1108,10 +1111,12 @@ def autoplan(
 
     goals = {"ceiling": body.ceiling, "floorP": body.floor_protein,
              "floorF": body.floor_fibre}
-    def run(lib: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def run(lib: List[Dict[str, Any]],
+            repeats: Optional[int] = None) -> Dict[str, Any]:
         return weekplan.plan_week(
             lib, goals, days=body.days, meals_per_day=body.meals_per_day,
-            max_repeats=body.max_repeats, prices=prices, budget=body.budget)
+            max_repeats=repeats or body.max_repeats,
+            prices=prices, budget=body.budget)
 
     result = run(library)
 
@@ -1183,6 +1188,24 @@ def autoplan(
                 result["cheaperRoundAdded"] = len(fresh)
                 library = [_recipe_json(r) for r in rows]
 
+    by_id_for_sheet = {r.id: _recipe_json(r) for r in rows}
+    sheet = weekplan.cook_sheet(result["days"], by_id_for_sheet)
+    result["cookMinutes"] = sheet["totalMinutes"]
+
+    # Over the time asked for, the same trade the money budget already makes:
+    # try leaning harder on repeats rather than distinct dishes, and keep it
+    # only if it is genuinely better -- fewer minutes without giving up a day
+    # that was on target. This regenerates nothing; the library already has
+    # what it needs, it is only which of it gets chosen that changes.
+    if (body.max_sunday_minutes and sheet["totalMinutes"] > body.max_sunday_minutes):
+        leaner = run(library, max(1, body.max_repeats) + 3)
+        leaner_sheet = weekplan.cook_sheet(leaner["days"], by_id_for_sheet)
+        if (leaner_sheet["totalMinutes"] < sheet["totalMinutes"]
+                and leaner["daysMeetingTargets"] >= result["daysMeetingTargets"]):
+            result = leaner
+            result["cookMinutes"] = leaner_sheet["totalMinutes"]
+            result["fewerDishesForTime"] = True
+
     if body.apply and result["days"]:
         names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
                  "Saturday", "Sunday"]
@@ -1203,6 +1226,37 @@ def autoplan(
 
     result["library"] = library
     return result
+
+
+@app.get("/api/plans/{plan_id}/cook-sheet")
+def cook_sheet(
+    plan_id: int,
+    user: User = Depends(auth.current_user),
+    session: Session = Depends(get_session),
+) -> Dict[str, Any]:
+    """What Sunday looks like for the week currently planned.
+
+    Not seven recipes -- whatever the week actually landed on, batched to how
+    much of each is needed and scheduled against one oven and two stovetop
+    burners, so a mince base and a pot of pasta can run at the same time the
+    way an actual Sunday does.
+    """
+    plan = _owned_plan(session, user, plan_id)
+    week = (plan.data or {}).get("week") or []
+    days = [{"meals": [m for m in (day.get("meals") or []) if m.get("on") is not False]}
+            for day in week]
+    rows = list(session.scalars(
+        select(Recipe).where(Recipe.user_id == user.id)).all())
+    by_id = {r.id: _recipe_json(r) for r in rows}
+    sheet = weekplan.cook_sheet(days, by_id)
+    if not sheet["steps"]:
+        sheet["message"] = "Nothing planned yet -- plan the week first."
+    else:
+        hours, minutes = divmod(sheet["totalMinutes"], 60)
+        clock = (f"{hours}h {minutes}m" if hours else f"{minutes} min")
+        sheet["message"] = (f"{sheet['dishCount']} dish{'es' if sheet['dishCount'] != 1 else ''} "
+                            f"to cook, about {clock} start to finish.")
+    return sheet
 
 
 @app.post("/api/rebalance")
